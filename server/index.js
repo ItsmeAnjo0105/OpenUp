@@ -5,6 +5,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 const fs = require('fs');
 const path = require('path');
 
@@ -40,6 +41,12 @@ app.get('/test-supabase', async (req, res) => {
     headers: { apikey: process.env.SUPABASE_KEY },
   });
   res.json({ connected: response.ok, status: response.status });
+});
+
+app.get('/barangays', async (req, res) => {
+  const { data, error } = await supabase.from('Barangay').select('*');
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
 });
 
 // POST /bookings — Booking → Care Credit check → Payment (full transaction flow)
@@ -150,6 +157,93 @@ app.get('/jitsi-token/:bookingId', (req, res) => {
   });
 
   res.json({ token, room: `${process.env.JAAS_APP_ID}/${roomName}` });
+});
+
+// POST /auth/signup
+app.post('/auth/signup', async (req, res) => {
+  const { name, email, password, role, barangay_id, status } = req.body;
+
+  if (!name || !email || !password || !role || !barangay_id) {
+    return res.status(400).json({ error: 'name, email, password, role, and barangay_id are required' });
+  }
+
+  // Check if email already exists
+  const { data: existing } = await supabase
+    .from('User')
+    .select('user_id')
+    .eq('email', email)
+    .limit(1);
+
+  if (existing && existing.length > 0) {
+    return res.status(409).json({ error: 'An account with this email already exists' });
+  }
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  const { data, error } = await supabase
+    .from('User')
+    .insert([{
+      name,
+      email,
+      password: hashedPassword,
+      role,
+      barangay_id,
+      status: status || 'active',
+    }])
+    .select('user_id, name, email, role, barangay_id, status'); // never return the password
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.status(201).json(data[0]);
+});
+
+// POST /auth/login
+app.post('/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'email and password are required' });
+  }
+
+  const { data: users, error } = await supabase
+    .from('User')
+    .select('*')
+    .eq('email', email)
+    .limit(1);
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  if (!users || users.length === 0) {
+    return res.status(401).json({ error: 'Invalid email or password' });
+  }
+
+  const user = users[0];
+  const passwordMatches = await bcrypt.compare(password, user.password);
+
+  if (!passwordMatches) {
+    return res.status(401).json({ error: 'Invalid email or password' });
+  }
+
+  const token = jwt.sign(
+    { user_id: user.user_id, role: user.role, name: user.name },
+    process.env.JWT_SECRET,
+    { expiresIn: '8h' }
+  );
+
+  res.json({
+    token,
+    user: {
+      user_id: user.user_id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      barangay_id: user.barangay_id,
+    },
+  });
 });
 
 server.listen(PORT, () => {

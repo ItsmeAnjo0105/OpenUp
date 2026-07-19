@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import DailyInsights from '../components/DailyInsights';
+import MoodCalendar from '../components/MoodCalendar';
 import { API_URL } from '../config';
 
 const moods = [
@@ -48,14 +49,6 @@ function MoodTracker() {
   const today = new Date().toISOString().split('T')[0];
   const todayEntry = entries.find((e) => e.entry_date === today);
 
-  // Current month calendar
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const firstDayOfWeek = new Date(year, month, 1).getDay();
-  const loggedDates = new Set(entries.map((e) => e.entry_date));
-
   return (
     <Layout>
       <div className="max-w-2xl mx-auto space-y-6">
@@ -86,30 +79,7 @@ function MoodTracker() {
 
         <DailyInsights userId={user.user_id} />
 
-        <div className="bg-brand-surface rounded-2xl shadow-sm p-6">
-          <p className="font-medium mb-4">Mood calendar</p>
-          <div className="grid grid-cols-7 gap-2 text-center text-xs text-brand-ink/40 mb-2">
-            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={i}>{d}</div>)}
-          </div>
-          <div className="grid grid-cols-7 gap-2">
-            {[...Array(firstDayOfWeek)].map((_, i) => <div key={`empty-${i}`} />)}
-            {[...Array(daysInMonth)].map((_, i) => {
-              const day = i + 1;
-              const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              const logged = loggedDates.has(dateStr);
-              return (
-                <div
-                  key={day}
-                  className={`aspect-square flex items-center justify-center rounded-lg text-sm ${
-                    logged ? 'bg-brand-primary text-white font-medium' : 'bg-brand-ink/5 text-brand-ink/60'
-                  }`}
-                >
-                  {day}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <MoodCalendar userId={user.user_id} />
       </div>
     </Layout>
   );

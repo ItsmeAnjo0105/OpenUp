@@ -14,7 +14,7 @@ const modules = [
   { label: 'Profile', path: '/profile', icon: '👤', enabled: false },
 ];
 
-function Sidebar() {
+function Sidebar({ sidebarOpen, setSidebarOpen }) {
   const location = useLocation();
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
@@ -26,12 +26,25 @@ function Sidebar() {
   };
 
   return (
-    <aside className="w-64 min-h-screen bg-brand-surface border-r border-brand-ink/10 flex flex-col">
-      <div className="px-5 py-6 flex items-center gap-2">
-        <span className="text-2xl">💚</span>
-        <Link to="/dashboard" className="font-display text-xl font-semibold text-brand-primary">
-          OpenUp
-        </Link>
+    <aside
+      className={`w-64 min-h-screen bg-brand-surface border-r border-brand-ink/10 flex flex-col
+        fixed left-0 top-0 h-full z-50 transition-transform duration-300
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        md:translate-x-0 md:static`}
+    >
+      <div className="px-5 py-6 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-2xl">💚</span>
+          <Link to="/dashboard" className="font-display text-xl font-semibold text-brand-primary">
+            OpenUp
+          </Link>
+        </div>
+        <button
+          onClick={() => setSidebarOpen(false)}
+          className="md:hidden text-xl text-brand-ink/50"
+        >
+          ✕
+        </button>
       </div>
 
       <nav className="flex-1 px-3 space-y-1 overflow-y-auto">

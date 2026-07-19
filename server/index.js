@@ -361,7 +361,7 @@ async function generateLLMReflection(transcript) {
 
 // POST /voice-journal — audio upload → Whisper transcription → emotion analysis → crisis check → save
 app.post('/voice-journal', upload.single('audio'), async (req, res) => {
-  const { user_id } = req.body;
+  const { user_id, duration_seconds } = req.body;
   const audioFile = req.file;
 
   if (!user_id || !audioFile) {
@@ -434,10 +434,27 @@ app.post('/voice-journal', upload.single('audio'), async (req, res) => {
       ? "Please don't face this alone — connecting with a licensed psychologist can help."
       : 'Consider a short breathing exercise, or reaching out to someone you trust today.';
 
-    // Step 4: Save to Supabase
+    // Step 4: Upload the audio to storage now that the user has confirmed they want to keep it
+    const audioPath = `${user_id}/${Date.now()}.webm`;
+    const { error: uploadError } = await supabase.storage
+      .from('voice-journal-audio')
+      .upload(audioPath, audioFile.buffer, { contentType: 'audio/webm' });
+
+    if (uploadError) {
+      return res.status(500).json({ error: uploadError.message });
+    }
+
+    // Step 5: Save to Supabase
     const { data, error } = await supabase
       .from('Voice_Journal')
-      .insert([{ user_id, transcript, emotion_result: contentEmotion, risk_flag: isCrisis }])
+      .insert([{
+        user_id,
+        transcript,
+        emotion_result: contentEmotion,
+        risk_flag: isCrisis,
+        audio_path: audioPath,
+        duration_seconds: duration_seconds ? Number(duration_seconds) : null,
+      }])
       .select();
 
     if (error) {

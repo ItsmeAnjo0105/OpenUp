@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { BarChart, Bar, XAxis, ResponsiveContainer } from 'recharts';
 import Layout from '../components/Layout';
+import DailyInsights from '../components/DailyInsights';
 import { API_URL } from '../config';
 
 const moods = [
@@ -48,18 +48,6 @@ function MoodTracker() {
   const today = new Date().toISOString().split('T')[0];
   const todayEntry = entries.find((e) => e.entry_date === today);
 
-  // Last 7 days for the bar chart
-  const last7 = [...Array(7)].map((_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    const dateStr = d.toISOString().split('T')[0];
-    const entry = entries.find((e) => e.entry_date === dateStr);
-    return {
-      day: d.toLocaleDateString('en-US', { weekday: 'narrow' }),
-      mood: entry ? entry.mood_level : 0,
-    };
-  });
-
   // Current month calendar
   const now = new Date();
   const year = now.getFullYear();
@@ -96,15 +84,7 @@ function MoodTracker() {
           </div>
         </div>
 
-        <div className="bg-brand-surface rounded-2xl shadow-sm p-6">
-          <p className="font-medium mb-4">This week</p>
-          <ResponsiveContainer width="100%" height={140}>
-            <BarChart data={last7}>
-              <XAxis dataKey="day" axisLine={false} tickLine={false} fontSize={12} />
-              <Bar dataKey="mood" fill="#2F5D50" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <DailyInsights userId={user.user_id} />
 
         <div className="bg-brand-surface rounded-2xl shadow-sm p-6">
           <p className="font-medium mb-4">Mood calendar</p>

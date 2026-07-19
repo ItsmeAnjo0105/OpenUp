@@ -697,6 +697,278 @@ app.post('/assessment', async (req, res) => {
   });
 });
 
+const MOOD_LABELS = { 1: 'Low', 2: 'Down', 3: 'Okay', 4: 'Good', 5: 'Calm' };
+const MOOD_EMOJI = { 1: '😞', 2: '😕', 3: '😐', 4: '🙂', 5: '😌' };
+
+const INSIGHT_COLORS = {
+  streak: '#5DCAA5',
+  trend: '#FAC775',
+  mood: '#F0997B',
+  locked: '#9CA3AF',
+  voice: '#B8A6E8',
+};
+
+function toDateStr(d) {
+  return d.toISOString().split('T')[0];
+}
+
+function startOfWeek(d) {
+  // Monday-start week
+  const date = new Date(d);
+  const day = date.getDay(); // 0 = Sunday
+  const diff = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + diff);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+const STOPWORDS = new Set([
+  'this', 'that', 'with', 'have', 'just', 'like', 'been', 'about', 'really',
+  'know', 'feel', 'feeling', 'felt', 'think', 'lately', 'today', 'still',
+  'even', 'when', 'what', 'they', 'them', 'because', 'from', 'want', 'going',
+  'there', 'here', 'were', 'would', 'could', 'should', 'their', 'your',
+  // contraction remnants left over once the keyword regex strips apostrophes
+  // (e.g. "don't" -> "dont") — without these, the most common "word" ends up
+  // being a stripped contraction rather than an actual theme
+  'dont', 'doesnt', 'cant', 'wont', 'isnt', 'wasnt', 'arent', 'couldnt',
+  'wouldnt', 'shouldnt', 'didnt', 'hasnt', 'havent', 'youre', 'theyre',
+  'weve', 'thats', 'whats',
+]);
+
+const KEYWORD_FOLLOWUPS = {
+  sleep: 'Worth noticing — want to check in on your sleep?',
+  tired: 'Worth noticing — want to check in on your sleep?',
+  insomnia: 'Worth noticing — want to check in on your sleep?',
+  work: 'Worth noticing — want to check in on your workload?',
+  exam: 'Worth noticing — want to check in on school stress?',
+  deadline: 'Worth noticing — want to check in on your workload?',
+  stress: 'Worth noticing — want to check in on what\'s been stressful?',
+  lonely: 'Worth noticing — want to check in on your support system?',
+  alone: 'Worth noticing — want to check in on your support system?',
+  money: 'Worth noticing — want to check in on financial stress?',
+  family: 'Worth noticing — want to check in on things at home?',
+};
+
+app.get('/insights/user/:userId', async (req, res) => {
+  const { userId } = req.params;
+  const cards = [];
+
+  const { data: moodEntries, error: moodError } = await supabase
+    .from('Mood_Entry')
+    .select('mood_level, entry_date')
+    .eq('user_id', userId)
+    .order('entry_date', { ascending: true });
+
+  if (moodError) return res.status(500).json({ error: moodError.message });
+
+  const entriesByDate = new Map((moodEntries || []).map((e) => [e.entry_date, e.mood_level]));
+
+  // --- Card 1: Streak ---
+  if (moodEntries && moodEntries.length > 0) {
+    // Current streak: consecutive days ending today
+    let currentStreak = 0;
+    const cursor = new Date();
+    while (entriesByDate.has(toDateStr(cursor))) {
+      currentStreak += 1;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+
+    // Longest streak ever, scanning all logged dates
+    const sortedDates = [...entriesByDate.keys()].sort();
+    let longestStreak = 0;
+    let running = 0;
+    let prevDate = null;
+    for (const dateStr of sortedDates) {
+      const d = new Date(dateStr);
+      if (prevDate) {
+        const diffDays = Math.round((d - prevDate) / 86400000);
+        running = diffDays === 1 ? running + 1 : 1;
+      } else {
+        running = 1;
+      }
+      longestStreak = Math.max(longestStreak, running);
+      prevDate = d;
+    }
+
+    if (currentStreak > 0) {
+      cards.push({
+        type: 'streak',
+        label: 'Streak',
+        icon: '🔥',
+        accentColor: INSIGHT_COLORS.streak,
+        title: `${currentStreak}-day check-in streak`,
+        subtext: currentStreak >= longestStreak
+          ? 'Your longest one yet.'
+          : `Best so far: ${longestStreak} days.`,
+      });
+    }
+  }
+
+  // --- Weekly boundaries ---
+  const thisWeekStart = startOfWeek(new Date());
+  const prevWeekStart = new Date(thisWeekStart);
+  prevWeekStart.setDate(prevWeekStart.getDate() - 7);
+  const prevWeekEnd = new Date(thisWeekStart);
+  prevWeekEnd.setDate(prevWeekEnd.getDate() - 1);
+
+  const thisWeekEntries = (moodEntries || []).filter((e) => new Date(e.entry_date) >= thisWeekStart);
+  const prevWeekEntries = (moodEntries || []).filter(
+    (e) => new Date(e.entry_date) >= prevWeekStart && new Date(e.entry_date) <= prevWeekEnd
+  );
+
+  // --- Card 2: Weekly trend ---
+  if (thisWeekEntries.length > 0 && prevWeekEntries.length > 0) {
+    const avg = (arr) => arr.reduce((sum, e) => sum + e.mood_level, 0) / arr.length;
+    const thisAvg = avg(thisWeekEntries);
+    const prevAvg = avg(prevWeekEntries);
+    const delta = thisAvg - prevAvg;
+
+    let title;
+    let verb;
+    if (delta > 0.3) {
+      title = 'Calmer than last week';
+      verb = 'improved';
+    } else if (delta < -0.3) {
+      title = 'A bit tougher than last week';
+      verb = 'dipped';
+    } else {
+      title = 'About the same as last week';
+      verb = 'stayed steady';
+    }
+
+    cards.push({
+      type: 'trend',
+      label: 'Weekly Trend',
+      icon: '📈',
+      accentColor: INSIGHT_COLORS.trend,
+      title,
+      subtext: `Your average mood ${verb} compared to the week before.`,
+    });
+  }
+
+  // --- Card 3: Most common mood this week ---
+  if (thisWeekEntries.length > 0) {
+    const counts = {};
+    thisWeekEntries.forEach((e) => {
+      counts[e.mood_level] = (counts[e.mood_level] || 0) + 1;
+    });
+    const [modeLevel, modeCount] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+
+    cards.push({
+      type: 'mood',
+      label: 'Top Mood',
+      icon: MOOD_EMOJI[modeLevel],
+      accentColor: INSIGHT_COLORS.mood,
+      title: `"${MOOD_LABELS[modeLevel]}" was your top mood`,
+      subtext: `Logged ${modeCount} out of ${thisWeekEntries.length} days this week.`,
+    });
+  }
+
+  // --- Card 4: Day-of-week pattern (locked until 3+ weeks of history) ---
+  if (moodEntries && moodEntries.length > 0) {
+    const earliestDate = new Date(moodEntries[0].entry_date);
+    const daysOfHistory = Math.floor((new Date() - earliestDate) / 86400000);
+
+    if (daysOfHistory < 21) {
+      cards.push({
+        type: 'locked',
+        label: 'Day Pattern',
+        icon: '🔒',
+        accentColor: INSIGHT_COLORS.locked,
+        title: 'Unlocks after 3 weeks',
+        subtext: 'Keep checking in — day-of-week patterns need more history to be reliable.',
+      });
+    } else {
+      const last21 = moodEntries.filter((e) => new Date(e.entry_date) >= new Date(Date.now() - 21 * 86400000));
+      const byWeekday = {};
+      last21.forEach((e) => {
+        const weekday = new Date(e.entry_date).getDay();
+        if (!byWeekday[weekday]) byWeekday[weekday] = [];
+        byWeekday[weekday].push(e.mood_level);
+      });
+
+      const overallAvg = last21.reduce((sum, e) => sum + e.mood_level, 0) / last21.length;
+      const weekdayNames = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
+
+      let lowestWeekday = null;
+      let lowestAvg = Infinity;
+      Object.entries(byWeekday).forEach(([weekday, levels]) => {
+        if (levels.length < 2) return; // need at least 2 occurrences to call it a pattern
+        const avg = levels.reduce((s, v) => s + v, 0) / levels.length;
+        if (avg < lowestAvg) {
+          lowestAvg = avg;
+          lowestWeekday = weekday;
+        }
+      });
+
+      if (lowestWeekday !== null && lowestAvg < overallAvg - 0.4) {
+        cards.push({
+          type: 'pattern',
+          label: 'Day Pattern',
+          icon: '📅',
+          accentColor: INSIGHT_COLORS.streak,
+          title: `${weekdayNames[lowestWeekday]} have been harder lately`,
+          subtext: 'Based on your average mood by day of the week, over the last 3+ weeks.',
+        });
+      } else {
+        cards.push({
+          type: 'pattern',
+          label: 'Day Pattern',
+          icon: '📅',
+          accentColor: INSIGHT_COLORS.streak,
+          title: 'No strong day pattern yet',
+          subtext: 'Your mood looks fairly consistent across the week so far.',
+        });
+      }
+    }
+  }
+
+  // --- Card 5: Voice journal keyword correlation ---
+  const { data: journalEntries } = await supabase
+    .from('Voice_Journal')
+    .select('transcript, emotion_result, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  const thisWeekJournal = (journalEntries || []).filter(
+    (j) => new Date(j.created_at) >= thisWeekStart
+  );
+
+  if (thisWeekJournal.length >= 2) {
+    const wordCounts = {};
+    thisWeekJournal.forEach((j) => {
+      const words = (j.transcript || '')
+        .toLowerCase()
+        .replace(/[^a-z\s]/g, '')
+        .split(/\s+/)
+        .filter((w) => w.length >= 4 && !STOPWORDS.has(w));
+      words.forEach((w) => {
+        wordCounts[w] = (wordCounts[w] || 0) + 1;
+      });
+    });
+
+    const topEntry = Object.entries(wordCounts)
+      .filter(([, count]) => count >= 2)
+      .sort((a, b) => b[1] - a[1])[0];
+
+    if (topEntry) {
+      const [keyword, count] = topEntry;
+      const followup = KEYWORD_FOLLOWUPS[keyword] || 'Worth noticing — want to explore this further?';
+
+      cards.push({
+        type: 'voice',
+        label: 'Voice Journal',
+        icon: '🎙️',
+        accentColor: INSIGHT_COLORS.voice,
+        title: `"${keyword}" came up ${count} times`,
+        subtext: followup,
+      });
+    }
+  }
+
+  res.json(cards);
+});
+
 server.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });

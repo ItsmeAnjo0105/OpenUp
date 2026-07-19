@@ -5,6 +5,10 @@ const MOOD_EMOJI = { 1: '😞', 2: '😟', 3: '😐', 4: '🙂', 5: '😌' };
 const MOOD_LABELS = { 1: 'Low', 2: 'Down', 3: 'Okay', 4: 'Good', 5: 'Calm' };
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
 
 function toDateStr(y, m, d) {
   return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -12,8 +16,31 @@ function toDateStr(y, m, d) {
 
 function MoodCalendar({ userId, month, year }) {
   const now = new Date();
-  const displayYear = year ?? now.getFullYear();
-  const displayMonth = month ?? now.getMonth(); // 0-indexed
+
+  // month/year props only seed the initial view — navigation is managed internally
+  const [displayMonth, setDisplayMonth] = useState(month ?? now.getMonth()); // 0-indexed
+  const [displayYear, setDisplayYear] = useState(year ?? now.getFullYear());
+
+  const isCurrentMonth = displayMonth === now.getMonth() && displayYear === now.getFullYear();
+
+  const goToPrevMonth = () => {
+    if (displayMonth === 0) {
+      setDisplayMonth(11);
+      setDisplayYear(displayYear - 1);
+    } else {
+      setDisplayMonth(displayMonth - 1);
+    }
+  };
+
+  const goToNextMonth = () => {
+    if (isCurrentMonth) return; // don't browse into a fully future month
+    if (displayMonth === 11) {
+      setDisplayMonth(0);
+      setDisplayYear(displayYear + 1);
+    } else {
+      setDisplayMonth(displayMonth + 1);
+    }
+  };
 
   const [entries, setEntries] = useState([]);
   const [journalEntries, setJournalEntries] = useState([]);
@@ -47,7 +74,29 @@ function MoodCalendar({ userId, month, year }) {
 
   return (
     <div className="bg-brand-surface rounded-2xl shadow-sm p-6">
-      <p className="font-medium mb-4">Mood calendar</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+        <p className="font-medium">Mood calendar</p>
+        <div className="flex items-center gap-3 self-end sm:self-auto">
+          <button
+            onClick={goToPrevMonth}
+            aria-label="Previous month"
+            className="w-7 h-7 flex items-center justify-center rounded-full text-brand-ink/60 hover:bg-brand-ink/5"
+          >
+            ‹
+          </button>
+          <p className="text-sm font-medium w-32 text-center">
+            {MONTH_NAMES[displayMonth]} {displayYear}
+          </p>
+          <button
+            onClick={goToNextMonth}
+            disabled={isCurrentMonth}
+            aria-label="Next month"
+            className="w-7 h-7 flex items-center justify-center rounded-full text-brand-ink/60 hover:bg-brand-ink/5 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+          >
+            ›
+          </button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-7 gap-1.5 text-center text-xs uppercase text-brand-ink/40 mb-2">
         {WEEKDAYS.map((d, i) => <div key={i}>{d}</div>)}

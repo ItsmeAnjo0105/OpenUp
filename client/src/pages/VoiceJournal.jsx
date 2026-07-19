@@ -1,31 +1,32 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { IconMicrophone } from '@tabler/icons-react';
 import Layout from '../components/Layout';
+import JournalHistory from '../components/JournalHistory';
 import { API_URL } from '../config';
 
-const EMOTION_REFLECTIONS = {
-  sadness: "It sounds like you're carrying something heavy right now. These feelings are real, and they matter.",
-  fear: "It sounds like something is weighing on you and making things feel uncertain or unsafe.",
-  anger: "It sounds like you're dealing with real frustration right now, and that's valid.",
-  joy: "It's good to hear some lightness in what you shared today.",
-  surprise: "It sounds like something unexpected has been on your mind.",
-  disgust: "It sounds like something's been sitting heavy and uncomfortable with you.",
-  neutral: "Thanks for sharing what's on your mind today.",
-};
+const BAR_COUNT = 5;
+const BAR_MIN_HEIGHT = 6; // px — never fully flatten to zero during quiet moments
 
 function VoiceJournal() {
   const [recording, setRecording] = useState(false);
   const [status, setStatus] = useState('');
+  const [micDenied, setMicDenied] = useState(false);
   const [result, setResult] = useState(null);
   const [dismissed, setDismissed] = useState(false);
   const [history, setHistory] = useState([]);
-  const [expandedId, setExpandedId] = useState(null);
   const [matching, setMatching] = useState(false);
   const [crisisStatus, setCrisisStatus] = useState(null);
+
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
-  const navigate = useNavigate();
+  const streamRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const animationFrameRef = useRef(null);
+  const barRefs = useRef([]);
 
+  const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   const loadHistory = () => {
@@ -39,24 +40,77 @@ function VoiceJournal() {
     if (user) loadHistory();
   }, [user]);
 
+  useEffect(() => {
+    // Clean up audio resources if the component unmounts mid-recording
+    return () => {
+      cancelAnimationFrame(animationFrameRef.current);
+      audioContextRef.current?.close();
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  const animateBars = () => {
+    const analyser = analyserRef.current;
+    if (!analyser) return;
+
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(data);
+
+    const groupSize = Math.floor(data.length / BAR_COUNT);
+    for (let i = 0; i < BAR_COUNT; i++) {
+      let sum = 0;
+      for (let j = 0; j < groupSize; j++) sum += data[i * groupSize + j];
+      const avg = sum / groupSize; // 0-255
+      const heightPx = Math.max(BAR_MIN_HEIGHT, Math.round((avg / 255) * 32));
+      const bar = barRefs.current[i];
+      if (bar) bar.style.height = `${heightPx}px`;
+    }
+
+    animationFrameRef.current = requestAnimationFrame(animateBars);
+  };
+
   const startRecording = async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    setMicDenied(false);
+    setStatus('');
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setMicDenied(true);
+      return;
+    }
+
+    streamRef.current = stream;
+
     const recorder = new MediaRecorder(stream);
     chunksRef.current = [];
-
     recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
     recorder.onstop = handleUpload;
-
     recorder.start();
     mediaRecorderRef.current = recorder;
+
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const audioContext = new AudioCtx();
+    const source = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 64;
+    source.connect(analyser);
+    audioContextRef.current = audioContext;
+    analyserRef.current = analyser;
+
+    animateBars();
+
     setRecording(true);
     setResult(null);
     setDismissed(false);
-    setStatus('');
   };
 
   const stopRecording = () => {
-    mediaRecorderRef.current.stop();
+    mediaRecorderRef.current?.stop();
+    cancelAnimationFrame(animationFrameRef.current);
+    audioContextRef.current?.close();
+    streamRef.current?.getTracks().forEach((t) => t.stop());
     setRecording(false);
     setStatus('Processing your entry...');
   };
@@ -118,15 +172,45 @@ function VoiceJournal() {
         <p className="text-brand-ink/60 text-sm mb-8">Speak freely. We'll listen and reflect it back.</p>
 
         <div className="bg-brand-surface rounded-2xl shadow-sm p-8 text-center mb-8">
-          <button
-            onClick={recording ? stopRecording : startRecording}
-            className={`w-24 h-24 rounded-full mx-auto flex items-center justify-center text-white font-medium transition-colors ${
-              recording ? 'bg-red-500' : 'bg-brand-primary hover:bg-brand-primary-dark'
-            }`}
-          >
-            {recording ? 'Stop' : 'Record'}
-          </button>
-          {status && <p className="mt-6 text-brand-ink/60 text-sm">{status}</p>}
+          <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
+            {!recording && (
+              <>
+                <span className="absolute w-24 h-24 rounded-full mic-ring" />
+                <span className="absolute w-24 h-24 rounded-full mic-ring" style={{ animationDelay: '0.6s' }} />
+              </>
+            )}
+            <button
+              onClick={recording ? stopRecording : startRecording}
+              className="relative z-10 w-24 h-24 rounded-full flex items-center justify-center"
+              style={{ backgroundColor: '#2b4d3f' }}
+            >
+              {recording ? (
+                <div className="flex items-end gap-1 h-8">
+                  {[...Array(BAR_COUNT)].map((_, i) => (
+                    <div
+                      key={i}
+                      ref={(el) => (barRefs.current[i] = el)}
+                      className="w-1.5 bg-white rounded-full"
+                      style={{ height: `${BAR_MIN_HEIGHT}px` }}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <IconMicrophone size={32} color="white" stroke={1.75} />
+              )}
+            </button>
+          </div>
+          <p className="mt-4 text-sm text-brand-ink/60 font-medium">
+            {recording ? 'Listening…' : 'Tap to open up'}
+          </p>
+
+          {micDenied && (
+            <p className="mt-4 text-sm text-brand-accent bg-brand-accent/10 rounded-lg px-4 py-3">
+              We couldn't access your microphone. Please allow microphone access in your browser
+              settings to use Voice Journal.
+            </p>
+          )}
+          {status && <p className="mt-4 text-brand-ink/60 text-sm">{status}</p>}
         </div>
 
         {result && (
@@ -190,64 +274,7 @@ function VoiceJournal() {
           </div>
         )}
 
-        <div>
-          <h2 className="font-display text-lg font-semibold mb-3">Past Entries</h2>
-          {history.length === 0 ? (
-            <p className="text-brand-ink/50 text-sm">No past entries yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {history.map((h) => {
-                const isOpen = expandedId === h.journal_id;
-                return (
-                  <div key={h.journal_id} className="bg-brand-surface rounded-lg shadow-sm overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setExpandedId(isOpen ? null : h.journal_id)}
-                      className="w-full text-left p-4 flex items-center justify-between"
-                    >
-                      <div className="min-w-0">
-                        <p className={`text-sm text-brand-ink/80 ${isOpen ? '' : 'truncate'}`}>
-                          {isOpen ? `"${h.transcript}"` : h.transcript}
-                        </p>
-                        <p className="text-xs text-brand-ink/40 mt-1">
-                          {new Date(h.created_at).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                        </p>
-                      </div>
-                      <span className="text-xs font-medium bg-brand-primary/10 text-brand-primary px-3 py-1 rounded-full capitalize shrink-0 ml-3">
-                        {h.emotion_result}
-                      </span>
-                    </button>
-
-                    {isOpen && (
-                      <div className="px-4 pb-4 space-y-3">
-                        {h.risk_flag && (
-                          <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
-                            <p className="text-sm text-purple-900 mb-3">
-                              This entry contained language that may indicate severe emotional
-                              distress. Connecting with a licensed psychologist can help.
-                            </p>
-                            <Link
-                              to="/booking"
-                              className="block text-center bg-brand-primary text-white py-2 rounded-full text-sm font-medium hover:bg-brand-primary-dark transition-colors"
-                            >
-                              Connect with a Licensed Psychologist
-                            </Link>
-                          </div>
-                        )}
-                        <div className="border-t border-brand-ink/10 pt-3">
-                          <p className="font-medium text-brand-primary text-sm mb-1">AI Reflection</p>
-                          <p className="text-sm text-brand-ink/80">
-                            {EMOTION_REFLECTIONS[h.emotion_result?.toLowerCase()] || EMOTION_REFLECTIONS.neutral}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <JournalHistory entries={history} />
       </div>
     </Layout>
   );

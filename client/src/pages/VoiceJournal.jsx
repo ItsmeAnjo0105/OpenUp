@@ -7,9 +7,11 @@ import { API_URL } from '../config';
 
 const BAR_COUNT = 5;
 const BAR_MIN_HEIGHT = 6; // px — never fully flatten to zero during quiet moments
+const SPEAKING_THRESHOLD = 20; // avg byte amplitude (0-255) above which we consider it "speech", not ambient noise
 
 function VoiceJournal() {
   const [recording, setRecording] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const [status, setStatus] = useState('');
   const [micDenied, setMicDenied] = useState(false);
   const [result, setResult] = useState(null);
@@ -25,6 +27,7 @@ function VoiceJournal() {
   const analyserRef = useRef(null);
   const animationFrameRef = useRef(null);
   const barRefs = useRef([]);
+  const speakingRef = useRef(false);
 
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
@@ -64,6 +67,15 @@ function VoiceJournal() {
       const heightPx = Math.max(BAR_MIN_HEIGHT, Math.round((avg / 255) * 32));
       const bar = barRefs.current[i];
       if (bar) bar.style.height = `${heightPx}px`;
+    }
+
+    // Overall amplitude decides whether the user is actively speaking right now
+    // (drives the pulsing rings) vs. just quiet ambient noise.
+    const overallAvg = data.reduce((sum, v) => sum + v, 0) / data.length;
+    const isSpeakingNow = overallAvg > SPEAKING_THRESHOLD;
+    if (isSpeakingNow !== speakingRef.current) {
+      speakingRef.current = isSpeakingNow;
+      setSpeaking(isSpeakingNow);
     }
 
     animationFrameRef.current = requestAnimationFrame(animateBars);
@@ -111,6 +123,8 @@ function VoiceJournal() {
     cancelAnimationFrame(animationFrameRef.current);
     audioContextRef.current?.close();
     streamRef.current?.getTracks().forEach((t) => t.stop());
+    speakingRef.current = false;
+    setSpeaking(false);
     setRecording(false);
     setStatus('Processing your entry...');
   };
@@ -173,7 +187,7 @@ function VoiceJournal() {
 
         <div className="bg-brand-surface rounded-2xl shadow-sm p-8 text-center mb-8">
           <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
-            {!recording && (
+            {recording && speaking && (
               <>
                 <span className="absolute w-24 h-24 rounded-full mic-ring" />
                 <span className="absolute w-24 h-24 rounded-full mic-ring" style={{ animationDelay: '0.6s' }} />

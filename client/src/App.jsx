@@ -8,6 +8,8 @@ import BookCounseling from './pages/BookCounseling';
 import Session from './pages/Session';
 import CrisisCompanion from './pages/CrisisCompanion';
 import MoodTracker from './pages/MoodTracker';
+import GroupSessions from './pages/GroupSessions';
+import GroupSession from './pages/GroupSession';
 
 function App() {
   return (
@@ -21,6 +23,8 @@ function App() {
       <Route path="/session/:bookingId" element={<Session />} />
       <Route path="/crisis-companion" element={<CrisisCompanion />} />
       <Route path="/mood-tracker" element={<MoodTracker />} />
+      <Route path="/group-counseling" element={<GroupSessions />} />
+      <Route path="/group-session/:groupSessionId" element={<GroupSession />} />
     </Routes>
   );
 }

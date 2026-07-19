@@ -5,7 +5,7 @@ const modules = [
   { label: 'AI Crisis Companion', path: '/crisis-companion', icon: '❤️', enabled: true },
   { label: 'Anonymous Chat', path: '/anonymous-chat', icon: '💬', enabled: false },
   { label: 'Book Counseling', path: '/booking', icon: '📅', enabled: true },
-  { label: 'Group Sessions', path: '/group-counseling', icon: '👥', enabled: false },
+  { label: 'Group Sessions', path: '/group-counseling', icon: '👥', enabled: true },
   { label: 'Mood Tracker', path: '/mood-tracker', icon: '📈', enabled: true },
   { label: 'Voice Journal', path: '/voice-journal', icon: '🎙️', enabled: true },
   { label: 'Community', path: '/community', icon: '🌱', enabled: false },

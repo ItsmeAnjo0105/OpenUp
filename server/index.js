@@ -184,6 +184,44 @@ app.get('/jitsi-token/:bookingId', (req, res) => {
   res.json({ token, room: `${process.env.JAAS_APP_ID}/${roomName}` });
 });
 
+app.get('/group-sessions', async (req, res) => {
+  const { data, error } = await supabase
+    .from('Group_Session')
+    .select('*, Psychologist(psychologist_id, User(name))')
+    .order('schedule', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// Reuses the same JWT-signing logic as /jitsi-token, but keyed by group_session_id
+app.get('/group-session-token/:groupSessionId', (req, res) => {
+  const { groupSessionId } = req.params;
+  const { name, role } = req.query;
+
+  const roomName = `openup-group-${groupSessionId}`;
+  const isModerator = role === 'psychologist';
+
+  const payload = {
+    aud: 'jitsi',
+    iss: 'chat',
+    sub: process.env.JAAS_APP_ID,
+    room: roomName,
+    exp: Math.floor(Date.now() / 1000) + 60 * 60,
+    context: {
+      user: { name: name || 'Guest', moderator: isModerator },
+      features: { livestreaming: false, recording: false, transcription: false },
+    },
+  };
+
+  const token = jwt.sign(payload, privateKey, {
+    algorithm: 'RS256',
+    header: { kid: process.env.JAAS_KEY_ID },
+  });
+
+  res.json({ token, room: `${process.env.JAAS_APP_ID}/${roomName}` });
+});
+
 // POST /auth/signup
 app.post('/auth/signup', async (req, res) => {
   const { name, email, password, role, barangay_id, status } = req.body;

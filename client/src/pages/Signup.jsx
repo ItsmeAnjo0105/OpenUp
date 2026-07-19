@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { API_URL } from '../config';
 
 function Signup() {
   const [barangays, setBarangays] = useState([]);
@@ -11,7 +12,7 @@ function Signup() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    fetch('http://localhost:5000/barangays')
+    fetch(`${API_URL}/barangays`)
       .then((res) => res.json())
       .then(setBarangays)
       .catch(() => {});
@@ -25,7 +26,7 @@ function Signup() {
     setLoading(true);
 
     try {
-      const res = await fetch('http://localhost:5000/auth/signup', {
+      const res = await fetch(`${API_URL}/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),

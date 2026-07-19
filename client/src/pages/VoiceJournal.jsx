@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
+import { API_URL } from '../config';
 
 const EMOTION_REFLECTIONS = {
   sadness: "It sounds like you're carrying something heavy right now. These feelings are real, and they matter.",
@@ -28,7 +29,7 @@ function VoiceJournal() {
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   const loadHistory = () => {
-    fetch(`http://localhost:5000/voice-journal/user/${user.user_id}`)
+    fetch(`${API_URL}/voice-journal/user/${user.user_id}`)
       .then((res) => res.json())
       .then((data) => setHistory(Array.isArray(data) ? data : []))
       .catch(() => {});
@@ -67,7 +68,7 @@ function VoiceJournal() {
     formData.append('user_id', user.user_id);
 
     try {
-      const res = await fetch('http://localhost:5000/voice-journal', {
+      const res = await fetch(`${API_URL}/voice-journal`, {
         method: 'POST',
         body: formData,
       });
@@ -89,7 +90,7 @@ function VoiceJournal() {
   const handleCrisisMatch = async () => {
     setMatching(true);
     try {
-      const res = await fetch('http://localhost:5000/crisis-match', {
+      const res = await fetch(`${API_URL}/crisis-match`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: user.user_id }),

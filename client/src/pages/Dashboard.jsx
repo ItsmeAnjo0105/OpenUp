@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
+import { API_URL } from '../config';
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -14,7 +15,7 @@ function Dashboard() {
       return;
     }
 
-    fetch(`http://localhost:5000/bookings/user/${user.user_id}`)
+    fetch(`${API_URL}/bookings/user/${user.user_id}`)
       .then((res) => res.json())
       .then((data) => {
         setBookings(Array.isArray(data) ? data : []);

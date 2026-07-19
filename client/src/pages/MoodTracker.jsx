@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, ResponsiveContainer } from 'recharts';
 import Layout from '../components/Layout';
+import { API_URL } from '../config';
 
 const moods = [
   { level: 1, label: 'Low', emoji: '😞' },
@@ -16,7 +17,7 @@ function MoodTracker() {
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   const loadEntries = () => {
-    fetch(`http://localhost:5000/mood-entries/user/${user.user_id}`)
+    fetch(`${API_URL}/mood-entries/user/${user.user_id}`)
       .then((res) => res.json())
       .then((data) => setEntries(Array.isArray(data) ? data : []))
       .catch(() => {});
@@ -29,7 +30,7 @@ function MoodTracker() {
   const handleLogMood = async (level) => {
     setSaving(true);
     try {
-      await fetch('http://localhost:5000/mood-entries', {
+      await fetch(`${API_URL}/mood-entries`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: user.user_id, mood_level: level }),

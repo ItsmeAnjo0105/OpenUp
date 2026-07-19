@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
+import { API_URL } from '../config';
 
 function BookCounseling() {
   const [psychologists, setPsychologists] = useState([]);
@@ -12,7 +13,7 @@ function BookCounseling() {
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   useEffect(() => {
-    fetch('http://localhost:5000/psychologists')
+    fetch(`${API_URL}/psychologists`)
       .then((res) => res.json())
       .then(setPsychologists)
       .catch(() => {});
@@ -24,7 +25,7 @@ function BookCounseling() {
     setLoading(true);
 
     try {
-      const res = await fetch('http://localhost:5000/bookings', {
+      const res = await fetch(`${API_URL}/bookings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

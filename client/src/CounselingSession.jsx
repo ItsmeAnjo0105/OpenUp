@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { API_URL } from './config';
 
 function CounselingSession({ bookingId, name, role }) {
   const jitsiContainerRef = useRef(null);
@@ -7,7 +8,7 @@ function CounselingSession({ bookingId, name, role }) {
     let api;
     let disposed = false;
 
-    fetch(`http://localhost:5000/jitsi-token/${bookingId}?name=${name}&role=${role}`)
+    fetch(`${API_URL}/jitsi-token/${bookingId}?name=${name}&role=${role}`)
       .then((res) => res.json())
       .then(({ token, room }) => {
         if (disposed) return; // effect was cleaned up before the fetch resolved

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
+import { API_URL } from '../config';
 
 function CrisisCompanion() {
   const [messages, setMessages] = useState([
@@ -29,7 +30,7 @@ function CrisisCompanion() {
     setSending(true);
 
     try {
-      const res = await fetch('http://localhost:5000/crisis-companion/chat', {
+      const res = await fetch(`${API_URL}/crisis-companion/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: input, history: newMessages }),
@@ -48,7 +49,7 @@ function CrisisCompanion() {
   const handleCrisisMatch = async () => {
     setMatching(true);
     try {
-      const res = await fetch('http://localhost:5000/crisis-match', {
+      const res = await fetch(`${API_URL}/crisis-match`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: user.user_id }),

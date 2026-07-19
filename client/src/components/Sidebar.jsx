@@ -7,6 +7,7 @@ const modules = [
   { label: 'Book Counseling', path: '/booking', icon: '📅', enabled: true },
   { label: 'Group Sessions', path: '/group-counseling', icon: '👥', enabled: true },
   { label: 'Mood Tracker', path: '/mood-tracker', icon: '📈', enabled: true },
+  { label: 'Mental Health Assessment', path: '/assessment', icon: '📝', enabled: true },
   { label: 'Voice Journal', path: '/voice-journal', icon: '🎙️', enabled: true },
   { label: 'Community', path: '/community', icon: '🌱', enabled: false },
   { label: 'Resources', path: '/resources', icon: '📚', enabled: false },

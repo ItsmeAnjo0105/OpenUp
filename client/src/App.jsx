@@ -10,6 +10,7 @@ import CrisisCompanion from './pages/CrisisCompanion';
 import MoodTracker from './pages/MoodTracker';
 import GroupSessions from './pages/GroupSessions';
 import GroupSession from './pages/GroupSession';
+import Assessment from './pages/Assessment';
 
 function App() {
   return (
@@ -25,6 +26,7 @@ function App() {
       <Route path="/mood-tracker" element={<MoodTracker />} />
       <Route path="/group-counseling" element={<GroupSessions />} />
       <Route path="/group-session/:groupSessionId" element={<GroupSession />} />
+      <Route path="/assessment" element={<Assessment />} />
     </Routes>
   );
 }

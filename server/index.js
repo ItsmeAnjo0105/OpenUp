@@ -8,6 +8,8 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const fs = require('fs');
 const path = require('path');
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
 
 const privateKey = fs.readFileSync(path.join(__dirname, process.env.JAAS_PRIVATE_KEY_PATH), 'utf8');
 
@@ -45,6 +47,29 @@ app.get('/test-supabase', async (req, res) => {
 
 app.get('/barangays', async (req, res) => {
   const { data, error } = await supabase.from('Barangay').select('*');
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.get('/bookings/user/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  const { data, error } = await supabase
+    .from('Booking')
+    .select('*, Psychologist(psychologist_id, license_no, User(name))')
+    .eq('resident_id', userId)
+    .order('schedule', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.get('/psychologists', async (req, res) => {
+  const { data, error } = await supabase
+    .from('Psychologist')
+    .select('psychologist_id, license_no, is_verified, User(name)')
+    .eq('is_verified', true);
+
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });
@@ -244,6 +269,327 @@ app.post('/auth/login', async (req, res) => {
       barangay_id: user.barangay_id,
     },
   });
+});
+
+const CRISIS_PHRASES = [
+  'kill myself', 'want to die', 'end my life', 'better off without me',
+  'no reason to live', "can't go on", 'suicide', 'hurting myself',
+  'self harm', 'end it all', "don't want to be here anymore",
+  'no point in living',
+];
+
+const emotionReflections = {
+  sadness: "It sounds like you're carrying something heavy right now. These feelings are real, and they matter.",
+  fear: "It sounds like something is weighing on you and making things feel uncertain or unsafe.",
+  anger: "It sounds like you're dealing with real frustration right now, and that's valid.",
+  joy: "It's good to hear some lightness in what you shared today.",
+  surprise: "It sounds like something unexpected has been on your mind.",
+  disgust: "It sounds like something's been sitting heavy and uncomfortable with you.",
+  neutral: "Thanks for sharing what's on your mind today.",
+};
+
+function detectCrisisRisk(transcript) {
+  const lower = transcript.toLowerCase();
+  return CRISIS_PHRASES.some((phrase) => lower.includes(phrase));
+}
+
+async function generateLLMReflection(transcript) {
+  const prompt = `Write a short, warm, two-sentence reflection acknowledging the feelings in this personal journal entry. Do not give advice. Do not diagnose. Just reflect what they seem to be feeling: "${transcript}"`;
+
+  const res = await fetch('https://router.huggingface.co/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'openai/gpt-oss-20b',
+      messages: [{ role: 'user', content: prompt }],
+      // gpt-oss emits a chain-of-thought "reasoning" field before its final "content" —
+      // too small a budget truncates the response before content is ever produced.
+      max_tokens: 400,
+    }),
+  });
+
+  const data = await res.json();
+  const generated = data?.choices?.[0]?.message?.content;
+
+  if (!res.ok || !generated || generated.trim().length < 5) {
+    throw new Error('LLM reflection unavailable');
+  }
+
+  return generated.trim();
+}
+
+// POST /voice-journal — audio upload → Whisper transcription → emotion analysis → crisis check → save
+app.post('/voice-journal', upload.single('audio'), async (req, res) => {
+  const { user_id } = req.body;
+  const audioFile = req.file;
+
+  if (!user_id || !audioFile) {
+    return res.status(400).json({ error: 'user_id and an audio file are required' });
+  }
+
+  try {
+    // Step 1: Transcribe with Whisper via HuggingFace (free tier)
+    const whisperRes = await fetch(
+      'https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3-turbo',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+          'Content-Type': 'audio/webm',
+        },
+        body: audioFile.buffer,
+      }
+    );
+
+    const whisperData = await whisperRes.json();
+
+    if (!whisperRes.ok) {
+      // Free-tier models "cold start" — first request often needs to wait ~20s while it loads
+      if (whisperData.error && whisperData.error.includes('loading')) {
+        return res.status(503).json({ error: 'Model is warming up, try again in ~20 seconds.' });
+      }
+      return res.status(500).json({ error: 'Transcription failed', detail: whisperData });
+    }
+
+    const transcript = whisperData.text;
+
+    // Step 2: Emotion analysis with HuggingFace
+    const emotionRes = await fetch(
+      'https://router.huggingface.co/hf-inference/models/j-hartmann/emotion-english-distilroberta-base',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ inputs: transcript }),
+      }
+    );
+
+    const emotionData = await emotionRes.json();
+    const sorted = Array.isArray(emotionData?.[0])
+      ? [...emotionData[0]].sort((a, b) => b.score - a.score)
+      : [];
+
+    // "Content emotion" — from the words themselves.
+    // A second "tone emotion" pass (pitch/prosody from the raw audio) was planned here,
+    // but no HuggingFace-hosted speech-emotion-recognition model currently has an active
+    // inference provider (verified against several candidates) — tone_result stays null
+    // until a stable API for that becomes available.
+    const contentEmotion = sorted[0]?.label || 'unknown';
+    const contentIndicators = sorted.slice(0, 2).map((e) => e.label);
+
+    // Step 3: Crisis check (deterministic — never left to the LLM) + reflection generation
+    const isCrisis = detectCrisisRisk(transcript);
+
+    let reflectionBase;
+    try {
+      reflectionBase = await generateLLMReflection(transcript);
+    } catch {
+      reflectionBase = emotionReflections[contentEmotion.toLowerCase()] || emotionReflections.neutral;
+    }
+
+    const wellnessSuggestion = isCrisis
+      ? "Please don't face this alone — connecting with a licensed psychologist can help."
+      : 'Consider a short breathing exercise, or reaching out to someone you trust today.';
+
+    // Step 4: Save to Supabase
+    const { data, error } = await supabase
+      .from('Voice_Journal')
+      .insert([{ user_id, transcript, emotion_result: contentEmotion, risk_flag: isCrisis }])
+      .select();
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.status(201).json({
+      ...data[0],
+      emotional_summary: reflectionBase,
+      wellness_suggestion: wellnessSuggestion,
+      content_indicators: contentIndicators,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/voice-journal/user/:userId', async (req, res) => {
+  const { userId } = req.params;
+  const { data, error } = await supabase
+    .from('Voice_Journal')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/crisis-match', async (req, res) => {
+  const { user_id } = req.body;
+  if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+  // Find an available, verified psychologist
+  const { data: available, error: findError } = await supabase
+    .from('Psychologist')
+    .select('psychologist_id')
+    .eq('is_verified', true)
+    .eq('is_available', true)
+    .limit(1);
+
+  if (findError) return res.status(500).json({ error: findError.message });
+
+  if (!available || available.length === 0) {
+    // No one free — add to the priority queue instead
+    const { data: queued, error: queueError } = await supabase
+      .from('Crisis_Requests')
+      .insert([{ user_id, status: 'queued' }])
+      .select();
+
+    if (queueError) return res.status(500).json({ error: queueError.message });
+
+    return res.json({ matched: false, queued: queued[0] });
+  }
+
+  const psychologistId = available[0].psychologist_id;
+
+  // Check for an available care credit, same logic as your regular booking route
+  const { data: credits } = await supabase
+    .from('Care_Credit')
+    .select('*')
+    .eq('resident_id', user_id)
+    .eq('status', 'available')
+    .limit(1);
+
+  const careCredit = credits && credits.length > 0 ? credits[0] : null;
+
+  const { data: bookingData, error: bookingError } = await supabase
+    .from('Booking')
+    .insert([{
+      resident_id: user_id,
+      psychologist_id: psychologistId,
+      schedule: new Date().toISOString(),
+      status: 'confirmed',
+      session_type: 'crisis',
+      care_credit_id: careCredit ? careCredit.credit_id : null,
+    }])
+    .select();
+
+  if (bookingError) return res.status(500).json({ error: bookingError.message });
+  const booking = bookingData[0];
+
+  if (careCredit) {
+    await supabase.from('Care_Credit').update({ status: 'used' }).eq('credit_id', careCredit.credit_id);
+  }
+
+  await supabase.from('Payment').insert([{
+    booking_id: booking.booking_id,
+    amount: 1000,
+    status: careCredit ? 'paid' : 'pending',
+  }]);
+
+  // Mark the psychologist as no longer immediately available
+  await supabase.from('Psychologist').update({ is_available: false }).eq('psychologist_id', psychologistId);
+
+  res.json({ matched: true, booking });
+});
+
+const COMPANION_SYSTEM_PROMPT = `You are a warm, supportive, non-clinical companion inside a mental wellness app called OpenUp for Cebu City residents. Respond in 2-4 sentences. Offer a simple grounding or breathing exercise if it fits naturally. Never diagnose, never use clinical labels, never claim to be a licensed professional. Match the language the person used (Bisaya, Filipino, or English) as best you can. Gently encourage reaching out to a licensed psychologist for anything serious, without being pushy or repetitive. Never invent or state specific phone numbers, hotline numbers, or emergency contact details under any circumstance — you do not actually know them; the app shows verified local crisis resources separately. If someone expresses thoughts of self-harm or suicide, respond with calm, direct empathy and gently point them toward the app's in-app option to connect with a licensed psychologist, without listing any phone numbers yourself.`;
+
+app.post('/crisis-companion/chat', async (req, res) => {
+  const { message, history } = req.body;
+
+  if (!message) return res.status(400).json({ error: 'message is required' });
+
+  const isCrisis = detectCrisisRisk(message);
+
+  // `history` already ends with this same user message (the client appends it before sending),
+  // so it's passed through as-is rather than appending `message` a second time.
+  const recentHistory = (history || []).slice(-6).map((h) => ({
+    role: h.role === 'user' ? 'user' : 'assistant',
+    content: h.content,
+  }));
+
+  try {
+    const llmRes = await fetch('https://router.huggingface.co/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'openai/gpt-oss-20b',
+        messages: [
+          { role: 'system', content: COMPANION_SYSTEM_PROMPT },
+          ...recentHistory,
+        ],
+        // gpt-oss's internal "reasoning" chain runs noticeably longer on sensitive/crisis
+        // content before producing a final answer — too small a budget truncates the reply
+        // before any content is ever emitted (same issue as the Voice Journal reflection).
+        max_tokens: 900,
+      }),
+    });
+    const data = await llmRes.json();
+    const reply = data?.choices?.[0]?.message?.content?.trim();
+
+    res.json({
+      reply: reply || "I'm here with you. Can you tell me a bit more about what's going on?",
+      crisis_detected: isCrisis,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/mood-entries', async (req, res) => {
+  const { user_id, mood_level } = req.body;
+  if (!user_id || !mood_level) {
+    return res.status(400).json({ error: 'user_id and mood_level are required' });
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+
+  // Check if today's entry already exists — update it instead of creating a duplicate
+  const { data: existing } = await supabase
+    .from('Mood_Entry')
+    .select('mood_id')
+    .eq('user_id', user_id)
+    .eq('entry_date', today)
+    .limit(1);
+
+  if (existing && existing.length > 0) {
+    const { data, error } = await supabase
+      .from('Mood_Entry')
+      .update({ mood_level })
+      .eq('mood_id', existing[0].mood_id)
+      .select();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json(data[0]);
+  }
+
+  const { data, error } = await supabase
+    .from('Mood_Entry')
+    .insert([{ user_id, mood_level, entry_date: today }])
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data[0]);
+});
+
+app.get('/mood-entries/user/:userId', async (req, res) => {
+  const { userId } = req.params;
+  const { data, error } = await supabase
+    .from('Mood_Entry')
+    .select('*')
+    .eq('user_id', userId)
+    .order('entry_date', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
 });
 
 server.listen(PORT, () => {

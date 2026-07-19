@@ -630,6 +630,73 @@ app.get('/mood-entries/user/:userId', async (req, res) => {
   res.json(data);
 });
 
+const ASSESSMENT_SECTIONS = {
+  mood: ['A1', 'A2', 'A3', 'A4', 'A5'],
+  anxiety: ['B1', 'B2', 'B3', 'B4', 'B5'],
+  stress: ['C1', 'C2', 'C3', 'C4', 'C5'],
+};
+
+const BAND_RANK = { low: 0, moderate: 1, elevated: 2 };
+
+function bandForScore(score) {
+  if (score >= 10) return 'elevated';
+  if (score >= 5) return 'moderate';
+  return 'low';
+}
+
+// POST /assessment — score the 4-point Mood/Anxiety/Stress sections, plus the
+// D1 safety-check item, which is scored separately and never averaged into
+// the wellness bands.
+app.post('/assessment', async (req, res) => {
+  const { user_id, answers } = req.body;
+
+  if (!user_id || !answers) {
+    return res.status(400).json({ error: 'user_id and answers are required' });
+  }
+
+  const sumSection = (keys) => keys.reduce((total, key) => total + (Number(answers[key]) || 0), 0);
+
+  const moodScore = sumSection(ASSESSMENT_SECTIONS.mood);
+  const anxietyScore = sumSection(ASSESSMENT_SECTIONS.anxiety);
+  const stressScore = sumSection(ASSESSMENT_SECTIONS.stress);
+  const safetyScore = Number(answers.D1) || 0;
+  const safetyFlag = safetyScore > 0;
+
+  const moodBand = bandForScore(moodScore);
+  const anxietyBand = bandForScore(anxietyScore);
+  const stressBand = bandForScore(stressScore);
+
+  // Highest band wins — a spike in one section shouldn't be masked by lower scores elsewhere.
+  const overallBand = [moodBand, anxietyBand, stressBand].reduce(
+    (worst, band) => (BAND_RANK[band] > BAND_RANK[worst] ? band : worst),
+    'low'
+  );
+
+  const { data, error } = await supabase
+    .from('Assessment_Result')
+    .insert([{
+      user_id,
+      mood_score: moodScore,
+      anxiety_score: anxietyScore,
+      stress_score: stressScore,
+      overall_band: overallBand,
+      safety_flag: safetyFlag,
+      safety_score: safetyScore,
+    }])
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  res.status(201).json({
+    ...data[0],
+    sections: {
+      mood: { score: moodScore, band: moodBand },
+      anxiety: { score: anxietyScore, band: anxietyBand },
+      stress: { score: stressScore, band: stressBand },
+    },
+  });
+});
+
 server.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });

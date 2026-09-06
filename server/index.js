@@ -11,7 +11,10 @@ const path = require('path');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 
-const privateKey = fs.readFileSync(path.join(__dirname, process.env.JAAS_PRIVATE_KEY_PATH), 'utf8');
+// path.resolve (not path.join) so an absolute path — like Render's Secret Files,
+// which always live at /etc/secrets/<filename> regardless of the project folder —
+// overrides __dirname correctly. A relative path (local dev) still resolves as before.
+const privateKey = fs.readFileSync(path.resolve(__dirname, process.env.JAAS_PRIVATE_KEY_PATH), 'utf8');
 
 const app = express();
 const PORT = 5000;
@@ -67,11 +70,20 @@ app.get('/bookings/user/:userId', async (req, res) => {
 app.get('/psychologists', async (req, res) => {
   const { data, error } = await supabase
     .from('Psychologist')
-    .select('psychologist_id, license_no, is_verified, User(name)')
+    .select('psychologist_id, license_no, is_verified, credentials, specialties, rating, session_price, profile_photo_url, User(name)')
     .eq('is_verified', true);
 
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+
+  // Resolve stored storage paths to actual displayable URLs
+  const withPhotoUrls = data.map((p) => ({
+    ...p,
+    profile_photo_url: p.profile_photo_url
+      ? supabase.storage.from('psychologist-photos').getPublicUrl(p.profile_photo_url).data.publicUrl
+      : null,
+  }));
+
+  res.json(withPhotoUrls);
 });
 
 // POST /bookings — Booking → Care Credit check → Payment (full transaction flow)
@@ -81,6 +93,19 @@ app.post('/bookings', async (req, res) => {
   if (!resident_id || !psychologist_id || !schedule) {
     return res.status(400).json({ error: 'resident_id, psychologist_id, and schedule are required' });
   }
+
+  // Step 0: look up this psychologist's own session price — pricing is per-psychologist, not flat platform-wide
+  const { data: psychologist, error: psychologistError } = await supabase
+    .from('Psychologist')
+    .select('session_price')
+    .eq('psychologist_id', psychologist_id)
+    .single();
+
+  if (psychologistError || !psychologist) {
+    return res.status(404).json({ error: 'Psychologist not found' });
+  }
+
+  const sessionPrice = Number(psychologist.session_price);
 
   // Step 1: check if the resident has an available Care_Credit
   const { data: credits, error: creditError } = await supabase
@@ -127,13 +152,19 @@ app.post('/bookings', async (req, res) => {
   }
 
   // Step 4: create the Payment record.
-  // Session fee: ₱800 to the psychologist + ₱200 to the platform = ₱1000 total.
+  // 80/20 split of THIS psychologist's own session_price (not a flat ₱800/₱200 —
+  // pricing varies per psychologist, so the platform's cut must be a percentage).
   // If a care credit covered it, the resident owes nothing and the payment is marked 'paid'.
+  const psychologistPayout = Math.round(sessionPrice * 0.8 * 100) / 100;
+  const platformFee = Math.round(sessionPrice * 0.2 * 100) / 100;
+
   const { data: paymentData, error: paymentError } = await supabase
     .from('Payment')
     .insert([{
       booking_id: booking.booking_id,
-      amount: 1000,
+      amount: sessionPrice,
+      platform_fee: platformFee,
+      psychologist_payout: psychologistPayout,
       status: careCredit ? 'paid' : 'pending',
     }])
     .select();
@@ -491,7 +522,7 @@ app.post('/crisis-match', async (req, res) => {
   // Find an available, verified psychologist
   const { data: available, error: findError } = await supabase
     .from('Psychologist')
-    .select('psychologist_id')
+    .select('psychologist_id, session_price')
     .eq('is_verified', true)
     .eq('is_available', true)
     .limit(1);
@@ -511,6 +542,7 @@ app.post('/crisis-match', async (req, res) => {
   }
 
   const psychologistId = available[0].psychologist_id;
+  const sessionPrice = Number(available[0].session_price);
 
   // Check for an available care credit, same logic as your regular booking route
   const { data: credits } = await supabase
@@ -543,7 +575,9 @@ app.post('/crisis-match', async (req, res) => {
 
   await supabase.from('Payment').insert([{
     booking_id: booking.booking_id,
-    amount: 1000,
+    amount: sessionPrice,
+    platform_fee: Math.round(sessionPrice * 0.2 * 100) / 100,
+    psychologist_payout: Math.round(sessionPrice * 0.8 * 100) / 100,
     status: careCredit ? 'paid' : 'pending',
   }]);
 

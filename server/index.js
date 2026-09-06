@@ -11,10 +11,13 @@ const path = require('path');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 
-// path.resolve (not path.join) so an absolute path — like Render's Secret Files,
-// which always live at /etc/secrets/<filename> regardless of the project folder —
-// overrides __dirname correctly. A relative path (local dev) still resolves as before.
-const privateKey = fs.readFileSync(path.resolve(__dirname, process.env.JAAS_PRIVATE_KEY_PATH), 'utf8');
+// Prefer a plain env var holding the PEM contents directly (reliable on any host —
+// no dependency on a platform's "secret file" mount actually being present at boot).
+// Falls back to reading a local file for local dev, where JAAS_PRIVATE_KEY_PATH
+// points at server/jaas-private-key.pk.
+const privateKey = process.env.JAAS_PRIVATE_KEY
+  ? process.env.JAAS_PRIVATE_KEY.replace(/\\n/g, '\n')
+  : fs.readFileSync(path.resolve(__dirname, process.env.JAAS_PRIVATE_KEY_PATH), 'utf8');
 
 const app = express();
 const PORT = 5000;

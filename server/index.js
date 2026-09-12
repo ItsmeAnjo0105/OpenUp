@@ -117,6 +117,71 @@ app.get('/psychologists', async (req, res) => {
   res.json(withPhotoUrls);
 });
 
+// GET /psychologists/me — the logged-in psychologist's own profile, regardless of
+// verification status (the public /psychologists list above only shows is_verified=true,
+// which is exactly the status a psychologist waiting on approval needs to see).
+app.get('/psychologists/me', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { data, error } = await supabase
+    .from('Psychologist')
+    .select('*')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+  res.json(data);
+});
+
+// GET /admin/psychologists?status=pending|verified|all (default: pending)
+app.get('/admin/psychologists', requireAuth, requireRole('admin'), async (req, res) => {
+  const status = req.query.status || 'pending';
+
+  let query = supabase
+    .from('Psychologist')
+    .select('psychologist_id, user_id, license_no, credentials, specialties, session_price, is_verified, is_available, User(name, email, status)');
+
+  if (status === 'pending') query = query.eq('is_verified', false);
+  if (status === 'verified') query = query.eq('is_verified', true);
+
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// POST /admin/psychologists/:id/verify — approves an application: makes them
+// visible in the public /psychologists listing and immediately bookable.
+app.post('/admin/psychologists/:id/verify', requireAuth, requireRole('admin'), async (req, res) => {
+  const { data, error } = await supabase
+    .from('Psychologist')
+    .update({ is_verified: true, is_available: true })
+    .eq('psychologist_id', req.params.id)
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data || data.length === 0) return res.status(404).json({ error: 'Psychologist not found' });
+  res.json(data[0]);
+});
+
+// POST /admin/psychologists/:id/reject — leaves is_verified false (so they stay out
+// of every listing) and marks the underlying User account 'rejected' so the decision
+// is on record instead of the application just silently sitting there forever.
+app.post('/admin/psychologists/:id/reject', requireAuth, requireRole('admin'), async (req, res) => {
+  const { data: psychologist, error: findError } = await supabase
+    .from('Psychologist')
+    .select('user_id')
+    .eq('psychologist_id', req.params.id)
+    .single();
+
+  if (findError || !psychologist) return res.status(404).json({ error: 'Psychologist not found' });
+
+  const { error: updateError } = await supabase
+    .from('User')
+    .update({ status: 'rejected' })
+    .eq('user_id', psychologist.user_id);
+
+  if (updateError) return res.status(500).json({ error: updateError.message });
+  res.json({ rejected: true });
+});
+
 // POST /bookings — claim credit + create Booking + create Payment as one Postgres
 // transaction (see db/create_booking_transaction.sql). If any step fails — including
 // the unique-slot conflict — Postgres rolls back all of it, so there's never a
@@ -386,10 +451,17 @@ app.get('/group-session-token/:groupSessionId', (req, res) => {
 
 // POST /auth/signup
 app.post('/auth/signup', async (req, res) => {
-  const { name, email, password, role, barangay_id, status } = req.body;
+  const { name, email, password, role, barangay_id, license_no, credentials, session_price } = req.body;
 
   if (!name || !email || !password || !role || !barangay_id) {
     return res.status(400).json({ error: 'name, email, password, role, and barangay_id are required' });
+  }
+
+  // Psychologist applicants need these up front — an admin can't verify a license
+  // number that was never collected, and Psychologist.credentials/session_price
+  // are NOT NULL columns anyway.
+  if (role === 'psychologist' && (!license_no || !credentials || !session_price)) {
+    return res.status(400).json({ error: 'license_no, credentials, and session_price are required for psychologists' });
   }
 
   // Check if email already exists
@@ -413,7 +485,7 @@ app.post('/auth/signup', async (req, res) => {
       password: hashedPassword,
       role,
       barangay_id,
-      status: status || 'active',
+      status: 'active',
     }])
     .select('user_id, name, email, role, barangay_id, status'); // never return the password
 
@@ -421,7 +493,30 @@ app.post('/auth/signup', async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 
-  res.status(201).json(data[0]);
+  const user = data[0];
+
+  if (role === 'psychologist') {
+    // Unverified and unbookable until an admin approves it — see POST /admin/psychologists/:id/verify
+    const { error: psychError } = await supabase
+      .from('Psychologist')
+      .insert([{
+        user_id: user.user_id,
+        license_no,
+        credentials,
+        session_price: Number(session_price),
+        specialties: [],
+        is_verified: false,
+        is_available: false,
+      }]);
+
+    if (psychError) {
+      // Roll back the User row rather than leaving a psychologist account with no profile
+      await supabase.from('User').delete().eq('user_id', user.user_id);
+      return res.status(500).json({ error: psychError.message });
+    }
+  }
+
+  res.status(201).json(user);
 });
 
 // POST /auth/login

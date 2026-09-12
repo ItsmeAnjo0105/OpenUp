@@ -6,6 +6,7 @@ function Signup() {
   const [barangays, setBarangays] = useState([]);
   const [form, setForm] = useState({
     name: '', email: '', password: '', role: 'resident', barangay_id: '',
+    license_no: '', credentials: '', session_price: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -85,6 +86,37 @@ function Signup() {
               <option value="psychologist">Psychologist</option>
             </select>
           </div>
+
+          {form.role === 'psychologist' && (
+            <>
+              <div>
+                <label className="text-sm font-medium block mb-1">PRC license number</label>
+                <input
+                  name="license_no" value={form.license_no} onChange={handleChange} required
+                  className="w-full border border-brand-ink/15 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium block mb-1">Credentials</label>
+                <input
+                  name="credentials" value={form.credentials} onChange={handleChange} required
+                  placeholder="e.g. PRC Lic. Psychologist"
+                  className="w-full border border-brand-ink/15 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium block mb-1">Session price (₱)</label>
+                <input
+                  type="number" min="1" name="session_price" value={form.session_price} onChange={handleChange} required
+                  className="w-full border border-brand-ink/15 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-primary"
+                />
+              </div>
+              <p className="text-xs text-brand-ink/50 -mt-2">
+                An admin will need to verify your license before you appear to residents.
+              </p>
+            </>
+          )}
+
           <div>
             <label className="text-sm font-medium block mb-1">Barangay</label>
             <select

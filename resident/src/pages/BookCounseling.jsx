@@ -55,9 +55,9 @@ function BookCounseling() {
       }
 
       setStatus(
-        data.care_credit_applied
-          ? 'Booked! Covered by your OpenUp Care Credit.'
-          : `Booked! Payment of ₱${Number(selected.session_price).toLocaleString()} is pending.`
+        data.care_credit_reserved
+          ? "Request sent! Your Care Credit is reserved and will be used once the psychologist accepts."
+          : "Request sent! You'll be notified once the psychologist responds."
       );
       setLoading(false);
       setTimeout(() => navigate('/dashboard'), 1800);

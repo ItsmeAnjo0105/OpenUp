@@ -6,6 +6,8 @@ function PsychologistDashboard() {
   const [checking, setChecking] = useState(true);
   const [profile, setProfile] = useState(null);
   const [profileError, setProfileError] = useState('');
+  const [requests, setRequests] = useState([]);
+  const [requestsError, setRequestsError] = useState('');
   const navigate = useNavigate();
   const user = getStoredUser();
 
@@ -13,6 +15,13 @@ function PsychologistDashboard() {
     localStorage.removeItem('openup_token');
     localStorage.removeItem('openup_user');
     navigate('/');
+  };
+
+  const loadRequests = () => {
+    fetch(`${API_URL}/psychologists/me/booking-requests`, { headers: authHeader() })
+      .then((res) => res.json())
+      .then(setRequests)
+      .catch(() => setRequestsError('Could not load appointment requests.'));
   };
 
   useEffect(() => {
@@ -25,6 +34,7 @@ function PsychologistDashboard() {
       .then((res) => {
         if (!res.ok) throw new Error('invalid session');
         setChecking(false);
+        loadRequests();
       })
       .catch(() => {
         localStorage.removeItem('openup_token');
@@ -37,6 +47,24 @@ function PsychologistDashboard() {
       .then(({ ok, data }) => (ok ? setProfile(data) : setProfileError(data.error)))
       .catch(() => setProfileError('Could not load your profile.'));
   }, []);
+
+  const act = async (bookingId, action) => {
+    setRequestsError('');
+    try {
+      const res = await fetch(`${API_URL}/bookings/${bookingId}/${action}`, {
+        method: 'POST',
+        headers: authHeader(),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setRequestsError(data.error || 'Something went wrong.');
+        return;
+      }
+      setRequests((prev) => prev.filter((r) => r.booking_id !== bookingId));
+    } catch {
+      setRequestsError('Could not reach the server.');
+    }
+  };
 
   if (checking) return null;
 
@@ -83,9 +111,46 @@ function PsychologistDashboard() {
             </div>
           )}
 
-          <p className="text-sm text-brand-ink/60">
-            Appointment requests will appear here once you're verified.
-          </p>
+        </div>
+
+        <div className="bg-brand-surface rounded-2xl shadow-sm p-6 mt-6">
+          <h2 className="font-display text-lg font-semibold mb-4">Appointment requests</h2>
+
+          {requestsError && <p className="text-sm text-red-600 mb-3">{requestsError}</p>}
+
+          {requests.length === 0 ? (
+            <p className="text-sm text-brand-ink/50">No pending requests.</p>
+          ) : (
+            <div className="space-y-3">
+              {requests.map((r) => (
+                <div
+                  key={r.booking_id}
+                  className="border border-brand-ink/10 rounded-xl p-4 flex items-center justify-between"
+                >
+                  <div>
+                    <p className="text-sm font-semibold">{r.User?.name || `Resident #${r.resident_id}`}</p>
+                    <p className="text-xs text-brand-ink/60 mt-1">
+                      {new Date(r.schedule).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => act(r.booking_id, 'accept')}
+                      className="text-xs font-medium px-3 py-1.5 rounded-full bg-brand-primary text-white"
+                    >
+                      Accept
+                    </button>
+                    <button
+                      onClick={() => act(r.booking_id, 'decline')}
+                      className="text-xs font-medium px-3 py-1.5 rounded-full border border-red-300 text-red-600"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

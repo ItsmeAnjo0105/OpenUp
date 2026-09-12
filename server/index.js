@@ -186,6 +186,8 @@ app.post('/admin/psychologists/:id/reject', requireAuth, requireRole('admin'), a
 // transaction (see db/create_booking_transaction.sql). If any step fails — including
 // the unique-slot conflict — Postgres rolls back all of it, so there's never a
 // booking left without a payment, or a credit stranded as 'used' with nothing to show for it.
+// Creates a *request* (status 'pending', credit only reserved) — it isn't confirmed
+// until the psychologist accepts it. See POST /bookings/:id/accept and /decline below.
 app.post('/bookings', async (req, res) => {
   const { resident_id, psychologist_id, schedule } = req.body;
 
@@ -197,6 +199,7 @@ app.post('/bookings', async (req, res) => {
     p_resident_id: resident_id,
     p_psychologist_id: psychologist_id,
     p_schedule: schedule,
+    p_auto_confirm: false,
   });
 
   if (error) {
@@ -204,12 +207,86 @@ app.post('/bookings', async (req, res) => {
       return res.status(404).json({ error: 'Psychologist not found' });
     }
     if (error.code === '23505') {
-      return res.status(409).json({ error: 'This slot was just booked by someone else. Please pick another time.' });
+      return res.status(409).json({ error: 'This slot was just requested by someone else. Please pick another time.' });
     }
     return res.status(500).json({ error: error.message });
   }
 
   res.status(201).json(data);
+});
+
+// GET /psychologists/me/booking-requests — the logged-in psychologist's own pending
+// appointment requests, oldest first.
+app.get('/psychologists/me/booking-requests', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { data: psychologist, error: psychError } = await supabase
+    .from('Psychologist')
+    .select('psychologist_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  if (psychError || !psychologist) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data, error } = await supabase
+    .from('Booking')
+    .select('*, User(name)')
+    .eq('psychologist_id', psychologist.psychologist_id)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// POST /bookings/:id/accept — confirms the request: consumes the reserved credit (if
+// any) and creates the Payment. See db/booking_accept_decline.sql.
+app.post('/bookings/:id/accept', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { data: psychologist, error: psychError } = await supabase
+    .from('Psychologist')
+    .select('psychologist_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  if (psychError || !psychologist) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data, error } = await supabase.rpc('accept_booking_request', {
+    p_booking_id: req.params.id,
+    p_psychologist_id: psychologist.psychologist_id,
+  });
+
+  if (error) {
+    if (error.message === 'BOOKING_NOT_FOUND') return res.status(404).json({ error: 'Booking not found' });
+    if (error.message === 'NOT_YOUR_BOOKING') return res.status(403).json({ error: 'This is not your booking request' });
+    if (error.message === 'BOOKING_NOT_PENDING') return res.status(409).json({ error: 'This request is no longer pending' });
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json(data);
+});
+
+// POST /bookings/:id/decline — releases the reserved credit back to 'available' and
+// frees up the slot for someone else to request. See db/booking_accept_decline.sql.
+app.post('/bookings/:id/decline', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { data: psychologist, error: psychError } = await supabase
+    .from('Psychologist')
+    .select('psychologist_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  if (psychError || !psychologist) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data, error } = await supabase.rpc('decline_booking_request', {
+    p_booking_id: req.params.id,
+    p_psychologist_id: psychologist.psychologist_id,
+  });
+
+  if (error) {
+    if (error.message === 'BOOKING_NOT_FOUND') return res.status(404).json({ error: 'Booking not found' });
+    if (error.message === 'NOT_YOUR_BOOKING') return res.status(403).json({ error: 'This is not your booking request' });
+    if (error.message === 'BOOKING_NOT_PENDING') return res.status(409).json({ error: 'This request is no longer pending' });
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json(data);
 });
 
 // GET /care-credits/reconciliation?barangay_id=3 (barangay_id optional — omit for every barangay)
@@ -250,6 +327,8 @@ app.get('/care-credits/reconciliation', async (req, res) => {
         total_amount_issued: 0,
         available: 0,
         amount_available: 0,
+        reserved: 0,
+        amount_reserved: 0,
         used: 0,
         amount_used: 0,
         other_status: 0,
@@ -262,6 +341,12 @@ app.get('/care-credits/reconciliation', async (req, res) => {
     if (c.status === 'available') {
       b.available += 1;
       b.amount_available += Number(c.amount);
+    } else if (c.status === 'reserved') {
+      // Held against a pending Appointment Request — not yet spent, not free to reuse.
+      // See db/booking_accept_decline.sql: accept turns this into 'used', decline
+      // releases it back to 'available'.
+      b.reserved += 1;
+      b.amount_reserved += Number(c.amount);
     } else if (c.status === 'used') {
       b.used += 1;
       b.amount_used += Number(c.amount);
@@ -273,7 +358,10 @@ app.get('/care-credits/reconciliation', async (req, res) => {
 
   const results = Object.values(byBarangay).map((b) => ({
     ...b,
-    reconciled: b.other_status === 0 && b.orphaned_used_credits === 0 && b.available + b.used === b.total_issued,
+    reconciled:
+      b.other_status === 0 &&
+      b.orphaned_used_credits === 0 &&
+      b.available + b.reserved + b.used === b.total_issued,
   }));
 
   if (barangay_id) {
@@ -284,6 +372,8 @@ app.get('/care-credits/reconciliation', async (req, res) => {
         total_amount_issued: 0,
         available: 0,
         amount_available: 0,
+        reserved: 0,
+        amount_reserved: 0,
         used: 0,
         amount_used: 0,
         other_status: 0,
@@ -778,12 +868,14 @@ app.post('/crisis-match', async (req, res) => {
 
   // Same atomic credit-claim + booking + payment transaction as /bookings — see
   // db/create_booking_transaction.sql — so a crisis match can't leave an orphaned
-  // booking or a stranded credit either.
+  // booking or a stranded credit either. p_auto_confirm: true skips the pending/accept
+  // step regular bookings now go through — an active crisis shouldn't wait on approval.
   const { data, error } = await supabase.rpc('create_booking_transaction', {
     p_resident_id: user_id,
     p_psychologist_id: psychologistId,
     p_schedule: new Date().toISOString(),
     p_session_type: 'crisis',
+    p_auto_confirm: true,
   });
 
   if (error) return res.status(500).json({ error: error.message });

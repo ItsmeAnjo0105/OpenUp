@@ -13,6 +13,7 @@ import GroupSession from './pages/GroupSession';
 import Assessment from './pages/Assessment';
 import PsychologistDashboard from './pages/PsychologistDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import AnonymousChat from './pages/AnonymousChat';
 
 function App() {
   return (
@@ -31,6 +32,7 @@ function App() {
       <Route path="/assessment" element={<Assessment />} />
       <Route path="/psychologist/dashboard" element={<PsychologistDashboard />} />
       <Route path="/admin/dashboard" element={<AdminDashboard />} />
+      <Route path="/anonymous-chat" element={<AnonymousChat />} />
     </Routes>
   );
 }

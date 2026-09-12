@@ -30,6 +30,20 @@ const io = new Server(server, {
 io.on('connection', (socket) => {
   console.log('A user connected');
 
+  // Anonymous Chat real-time delivery. The client must prove (via its JWT) that it's
+  // actually one of this booking's two participants before it's allowed to join the
+  // room -- otherwise anyone could guess a bookingId and eavesdrop on someone else's chat.
+  socket.on('join-booking-chat', async ({ bookingId, token }) => {
+    try {
+      const user = jwt.verify(token, process.env.JWT_SECRET);
+      const role = await getBookingParticipantRole(bookingId, user);
+      if (!role) return socket.emit('chat-error', { error: 'Not authorized for this conversation' });
+      socket.join(`booking-${bookingId}`);
+    } catch {
+      socket.emit('chat-error', { error: 'Invalid session' });
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('A user disconnected');
   });
@@ -66,6 +80,32 @@ function requireRole(...allowedRoles) {
     }
     next();
   };
+}
+
+// Returns 'resident' or 'psychologist' if this user is one of the two participants
+// on this booking, or null otherwise. Used to gate access to that booking's chat --
+// the whole point of Anonymous Chat is that only these two people can ever see it.
+async function getBookingParticipantRole(bookingId, user) {
+  const { data: booking, error } = await supabase
+    .from('Booking')
+    .select('resident_id, psychologist_id')
+    .eq('booking_id', bookingId)
+    .single();
+
+  if (error || !booking) return null;
+
+  if (user.role === 'resident' && booking.resident_id === user.user_id) return 'resident';
+
+  if (user.role === 'psychologist') {
+    const { data: psychologist } = await supabase
+      .from('Psychologist')
+      .select('psychologist_id')
+      .eq('user_id', user.user_id)
+      .single();
+    if (psychologist && psychologist.psychologist_id === booking.psychologist_id) return 'psychologist';
+  }
+
+  return null;
 }
 
 app.get('/', (req, res) => {
@@ -182,6 +222,66 @@ app.post('/admin/psychologists/:id/reject', requireAuth, requireRole('admin'), a
   res.json({ rejected: true });
 });
 
+// GET /admin/bookings?status=pending|confirmed|all (default: all except cancelled/declined)
+app.get('/admin/bookings', requireAuth, requireRole('admin'), async (req, res) => {
+  const status = req.query.status;
+
+  let query = supabase
+    .from('Booking')
+    .select('*, User(name), Psychologist(psychologist_id, User(name))')
+    .order('schedule', { ascending: true });
+
+  if (status && status !== 'all') {
+    query = query.eq('status', status);
+  } else if (!status) {
+    query = query.not('status', 'in', '(cancelled,declined)');
+  }
+
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// POST /admin/bookings/:id/cancel — see db/admin_booking_management.sql. Releases any
+// reserved/used credit and marks the Payment refunded or cancelled as appropriate.
+app.post('/admin/bookings/:id/cancel', requireAuth, requireRole('admin'), async (req, res) => {
+  const { data, error } = await supabase.rpc('admin_cancel_booking', { p_booking_id: req.params.id });
+
+  if (error) {
+    if (error.message === 'BOOKING_NOT_FOUND') return res.status(404).json({ error: 'Booking not found' });
+    if (error.message === 'ALREADY_TERMINAL') return res.status(409).json({ error: 'This booking is already cancelled or declined' });
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json(data);
+});
+
+// POST /admin/bookings/:id/reassign — body: { psychologist_id }. Recomputes the
+// Payment against the new psychologist's own session_price if already confirmed.
+app.post('/admin/bookings/:id/reassign', requireAuth, requireRole('admin'), async (req, res) => {
+  const { psychologist_id } = req.body;
+  if (!psychologist_id) return res.status(400).json({ error: 'psychologist_id is required' });
+
+  const { data, error } = await supabase.rpc('admin_reassign_booking', {
+    p_booking_id: req.params.id,
+    p_new_psychologist_id: psychologist_id,
+  });
+
+  if (error) {
+    if (error.message === 'BOOKING_NOT_FOUND') return res.status(404).json({ error: 'Booking not found' });
+    if (error.message === 'ALREADY_TERMINAL') return res.status(409).json({ error: 'This booking is already cancelled or declined' });
+    if (error.message === 'NEW_PSYCHOLOGIST_NOT_FOUND_OR_UNVERIFIED') {
+      return res.status(404).json({ error: 'That psychologist was not found or is not verified' });
+    }
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'That psychologist already has a booking at this exact time' });
+    }
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json(data);
+});
+
 // POST /bookings — claim credit + create Booking + create Payment as one Postgres
 // transaction (see db/create_booking_transaction.sql). If any step fails — including
 // the unique-slot conflict — Postgres rolls back all of it, so there's never a
@@ -237,6 +337,30 @@ app.get('/psychologists/me/booking-requests', requireAuth, requireRole('psycholo
   res.json(data);
 });
 
+// GET /psychologists/me/bookings?status=confirmed — the logged-in psychologist's own
+// confirmed sessions (as opposed to /booking-requests above, which is pending-only).
+app.get('/psychologists/me/bookings', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { data: psychologist, error: psychError } = await supabase
+    .from('Psychologist')
+    .select('psychologist_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  if (psychError || !psychologist) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  let query = supabase
+    .from('Booking')
+    .select('*, User(name)')
+    .eq('psychologist_id', psychologist.psychologist_id)
+    .order('schedule', { ascending: true });
+
+  if (req.query.status) query = query.eq('status', req.query.status);
+
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
 // POST /bookings/:id/accept — confirms the request: consumes the reserved credit (if
 // any) and creates the Payment. See db/booking_accept_decline.sql.
 app.post('/bookings/:id/accept', requireAuth, requireRole('psychologist'), async (req, res) => {
@@ -287,6 +411,44 @@ app.post('/bookings/:id/decline', requireAuth, requireRole('psychologist'), asyn
   }
 
   res.json(data);
+});
+
+// GET /bookings/:id/messages and POST /bookings/:id/messages — Anonymous Chat.
+// Only the resident and psychologist on this specific booking can read or post;
+// responses never include a user id or name, only sender_role, so identity masking
+// can't be broken by an API consumer joining in extra fields later.
+app.get('/bookings/:id/messages', requireAuth, async (req, res) => {
+  const role = await getBookingParticipantRole(req.params.id, req.user);
+  if (!role) return res.status(403).json({ error: 'You are not part of this conversation' });
+
+  const { data, error } = await supabase
+    .from('Message')
+    .select('message_id, sender_role, body, created_at')
+    .eq('booking_id', req.params.id)
+    .order('created_at', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/bookings/:id/messages', requireAuth, async (req, res) => {
+  const { body } = req.body;
+  if (!body || !body.trim()) return res.status(400).json({ error: 'body is required' });
+
+  const role = await getBookingParticipantRole(req.params.id, req.user);
+  if (!role) return res.status(403).json({ error: 'You are not part of this conversation' });
+
+  const { data, error } = await supabase
+    .from('Message')
+    .insert([{ booking_id: req.params.id, sender_role: role, body: body.trim() }])
+    .select('message_id, sender_role, body, created_at');
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  const message = data[0];
+  io.to(`booking-${req.params.id}`).emit('new-message', { booking_id: Number(req.params.id), ...message });
+
+  res.status(201).json(message);
 });
 
 // GET /care-credits/reconciliation?barangay_id=3 (barangay_id optional — omit for every barangay)
@@ -385,18 +547,19 @@ app.get('/care-credits/reconciliation', async (req, res) => {
   res.json(results);
 });
 
-// POST /care-credits/allocate — issues new Care Credits. Two modes, mutually exclusive:
+// POST /care-credits/allocate — issues new Care Credits against the barangay's Budget.
+// Two modes, mutually exclusive:
 //   { resident_id, amount } — issue one credit to a single resident. barangay_id is
 //     always derived from that resident's own User.barangay_id, never taken from the
 //     request body, so a credit can never be issued under a barangay the recipient
 //     doesn't actually belong to (the segregation guarantee this module is named for).
 //   { barangay_id, amount } — issue one credit of `amount` to every resident currently
 //     registered under that barangay (an LGU funding a round of credits for its own residents).
-//
-// NOTE: like every other route in this file, this endpoint has no auth/role check yet —
-// there's no admin-only gate stopping any caller from hitting it directly. Access control
-// is a separate, still-open gap across the whole API, not specific to this endpoint.
-app.post('/care-credits/allocate', async (req, res) => {
+// Both modes run through allocate_care_credit_single/allocate_care_credits_bulk (see
+// db/budget_and_subscription.sql), which reject the request if the barangay's
+// subscription isn't active or its budget can't cover the amount -- see Resource &
+// Budget Management / Subscription Monitoring.
+app.post('/care-credits/allocate', requireAuth, requireRole('admin'), async (req, res) => {
   const { barangay_id, resident_id, amount } = req.body;
 
   const numericAmount = Number(amount);
@@ -410,23 +573,22 @@ app.post('/care-credits/allocate', async (req, res) => {
     });
   }
 
+  const handleAllocationError = (error, res) => {
+    if (error.message === 'RESIDENT_NOT_FOUND') return res.status(404).json({ error: 'Resident not found' });
+    if (error.message === 'SUBSCRIPTION_INACTIVE') return res.status(400).json({ error: "This barangay's subscription is not active" });
+    if (error.message === 'NO_BUDGET_FOR_BARANGAY') return res.status(400).json({ error: 'This barangay has no funded budget yet' });
+    if (error.message === 'INSUFFICIENT_BUDGET') return res.status(400).json({ error: 'Insufficient remaining budget for this barangay' });
+    return res.status(500).json({ error: error.message });
+  };
+
   if (resident_id) {
-    const { data: resident, error: residentError } = await supabase
-      .from('User')
-      .select('user_id, barangay_id, role')
-      .eq('user_id', resident_id)
-      .single();
+    const { data, error } = await supabase.rpc('allocate_care_credit_single', {
+      p_resident_id: resident_id,
+      p_amount: numericAmount,
+    });
 
-    if (residentError || !resident) return res.status(404).json({ error: 'Resident not found' });
-    if (resident.role !== 'resident') return res.status(400).json({ error: 'This user is not a resident' });
-
-    const { data, error } = await supabase
-      .from('Care_Credit')
-      .insert([{ barangay_id: resident.barangay_id, resident_id: resident.user_id, amount: numericAmount, status: 'available' }])
-      .select();
-
-    if (error) return res.status(500).json({ error: error.message });
-    return res.status(201).json({ credits_issued: 1, total_amount: numericAmount, credits: data });
+    if (error) return handleAllocationError(error, res);
+    return res.status(201).json({ credits_issued: 1, total_amount: numericAmount, credits: [data] });
   }
 
   const { data: barangay, error: barangayError } = await supabase
@@ -437,33 +599,125 @@ app.post('/care-credits/allocate', async (req, res) => {
 
   if (barangayError || !barangay) return res.status(404).json({ error: 'Barangay not found' });
 
-  const { data: residents, error: residentsError } = await supabase
-    .from('User')
-    .select('user_id')
-    .eq('barangay_id', barangay_id)
-    .eq('role', 'resident');
+  const { data, error } = await supabase.rpc('allocate_care_credits_bulk', {
+    p_barangay_id: barangay_id,
+    p_amount: numericAmount,
+  });
 
-  if (residentsError) return res.status(500).json({ error: residentsError.message });
+  if (error) return handleAllocationError(error, res);
+  res.status(201).json(data);
+});
 
-  if (!residents || residents.length === 0) {
-    return res.status(200).json({ credits_issued: 0, total_amount: 0, message: 'No residents registered in this barangay yet' });
+// GET /admin/subscriptions — every barangay's subscription status (barangays with no
+// row yet default to 'inactive', which is also what blocks funding/allocation for them).
+app.get('/admin/subscriptions', requireAuth, requireRole('admin'), async (req, res) => {
+  const { data: barangays, error: bError } = await supabase.from('Barangay').select('barangay_id, name, city');
+  if (bError) return res.status(500).json({ error: bError.message });
+
+  const { data: subs, error: sError } = await supabase.from('Subscription').select('*');
+  if (sError) return res.status(500).json({ error: sError.message });
+
+  const subByBarangay = Object.fromEntries(subs.map((s) => [s.barangay_id, s]));
+
+  res.json(
+    barangays.map((barangay) => {
+      const sub = subByBarangay[barangay.barangay_id];
+      return {
+        barangay_id: barangay.barangay_id,
+        name: barangay.name,
+        city: barangay.city,
+        plan: sub?.plan || null,
+        status: sub?.status || 'inactive',
+        renewed_at: sub?.renewed_at || null,
+      };
+    })
+  );
+});
+
+// POST /admin/subscriptions/:barangayId — body: { plan, status }. Upserts the
+// barangay's subscription; setting status to 'active' stamps renewed_at.
+app.post('/admin/subscriptions/:barangayId', requireAuth, requireRole('admin'), async (req, res) => {
+  const { plan, status } = req.body;
+  const validStatuses = ['active', 'inactive', 'past_due', 'cancelled'];
+
+  if (!status || !validStatuses.includes(status)) {
+    return res.status(400).json({ error: `status must be one of: ${validStatuses.join(', ')}` });
   }
 
-  const rows = residents.map((r) => ({
-    barangay_id,
-    resident_id: r.user_id,
-    amount: numericAmount,
-    status: 'available',
-  }));
+  const { data: barangay, error: bError } = await supabase
+    .from('Barangay')
+    .select('barangay_id')
+    .eq('barangay_id', req.params.barangayId)
+    .single();
 
-  const { data, error } = await supabase.from('Care_Credit').insert(rows).select();
+  if (bError || !barangay) return res.status(404).json({ error: 'Barangay not found' });
+
+  const { data, error } = await supabase
+    .from('Subscription')
+    .upsert(
+      [{
+        barangay_id: req.params.barangayId,
+        plan: plan || 'basic',
+        status,
+        renewed_at: status === 'active' ? new Date().toISOString() : null,
+      }],
+      { onConflict: 'barangay_id' }
+    )
+    .select();
+
   if (error) return res.status(500).json({ error: error.message });
+  res.json(data[0]);
+});
 
-  res.status(201).json({
-    credits_issued: data.length,
-    total_amount: numericAmount * data.length,
-    credits: data,
+// GET /admin/budgets — every barangay's funded/spent/remaining totals.
+app.get('/admin/budgets', requireAuth, requireRole('admin'), async (req, res) => {
+  const { data: barangays, error: bError } = await supabase.from('Barangay').select('barangay_id, name, city');
+  if (bError) return res.status(500).json({ error: bError.message });
+
+  const { data: budgets, error: budError } = await supabase.from('Budget').select('*');
+  if (budError) return res.status(500).json({ error: budError.message });
+
+  const budgetByBarangay = Object.fromEntries(budgets.map((b) => [b.barangay_id, b]));
+
+  res.json(
+    barangays.map((barangay) => {
+      const budget = budgetByBarangay[barangay.barangay_id];
+      const totalFunded = budget ? Number(budget.total_funded) : 0;
+      const totalSpent = budget ? Number(budget.total_spent) : 0;
+      return {
+        barangay_id: barangay.barangay_id,
+        name: barangay.name,
+        city: barangay.city,
+        total_funded: totalFunded,
+        total_spent: totalSpent,
+        remaining: totalFunded - totalSpent,
+      };
+    })
+  );
+});
+
+// POST /admin/budgets/:barangayId/fund — body: { amount }. Blocked unless the
+// barangay's subscription is active — see db/budget_and_subscription.sql.
+app.post('/admin/budgets/:barangayId/fund', requireAuth, requireRole('admin'), async (req, res) => {
+  const { amount } = req.body;
+  const numericAmount = Number(amount);
+  if (!amount || Number.isNaN(numericAmount) || numericAmount <= 0) {
+    return res.status(400).json({ error: 'amount must be a positive number' });
+  }
+
+  const { data, error } = await supabase.rpc('fund_barangay_budget', {
+    p_barangay_id: req.params.barangayId,
+    p_amount: numericAmount,
   });
+
+  if (error) {
+    if (error.message === 'SUBSCRIPTION_INACTIVE') {
+      return res.status(400).json({ error: "This barangay's subscription is not active" });
+    }
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.status(201).json(data);
 });
 
 // GET /jitsi-token/:bookingId?name=Joan&role=resident

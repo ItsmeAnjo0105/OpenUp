@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { API_URL, authHeader, getStoredUser } from '../config';
+import ChatPanel from '../components/ChatPanel';
 
 function PsychologistDashboard() {
   const [checking, setChecking] = useState(true);
@@ -8,6 +9,8 @@ function PsychologistDashboard() {
   const [profileError, setProfileError] = useState('');
   const [requests, setRequests] = useState([]);
   const [requestsError, setRequestsError] = useState('');
+  const [sessions, setSessions] = useState([]);
+  const [chattingWith, setChattingWith] = useState(null);
   const navigate = useNavigate();
   const user = getStoredUser();
 
@@ -24,6 +27,13 @@ function PsychologistDashboard() {
       .catch(() => setRequestsError('Could not load appointment requests.'));
   };
 
+  const loadSessions = () => {
+    fetch(`${API_URL}/psychologists/me/bookings?status=confirmed`, { headers: authHeader() })
+      .then((res) => res.json())
+      .then(setSessions)
+      .catch(() => {});
+  };
+
   useEffect(() => {
     if (!user || user.role !== 'psychologist') {
       navigate('/login');
@@ -35,6 +45,7 @@ function PsychologistDashboard() {
         if (!res.ok) throw new Error('invalid session');
         setChecking(false);
         loadRequests();
+        loadSessions();
       })
       .catch(() => {
         localStorage.removeItem('openup_token');
@@ -147,6 +158,38 @@ function PsychologistDashboard() {
                       Decline
                     </button>
                   </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-brand-surface rounded-2xl shadow-sm p-6 mt-6">
+          <h2 className="font-display text-lg font-semibold mb-4">Confirmed sessions</h2>
+
+          {sessions.length === 0 ? (
+            <p className="text-sm text-brand-ink/50">No confirmed sessions yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {sessions.map((s) => (
+                <div key={s.booking_id}>
+                  <div className="border border-brand-ink/10 rounded-xl p-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold">{s.User?.name || `Resident #${s.resident_id}`}</p>
+                      <p className="text-xs text-brand-ink/60 mt-1">{new Date(s.schedule).toLocaleString()}</p>
+                    </div>
+                    <button
+                      onClick={() => setChattingWith(chattingWith === s.booking_id ? null : s.booking_id)}
+                      className="text-xs font-medium px-3 py-1.5 rounded-full border border-brand-ink/20"
+                    >
+                      {chattingWith === s.booking_id ? 'Close chat' : 'Chat'}
+                    </button>
+                  </div>
+                  {chattingWith === s.booking_id && (
+                    <div className="mt-2">
+                      <ChatPanel bookingId={s.booking_id} myRole="psychologist" />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

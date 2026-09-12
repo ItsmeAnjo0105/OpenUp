@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 const modules = [
   { label: 'Dashboard', path: '/dashboard', icon: '🏠', enabled: true },
   { label: 'AI Crisis Companion', path: '/crisis-companion', icon: '❤️', enabled: true },
-  { label: 'Anonymous Chat', path: '/anonymous-chat', icon: '💬', enabled: false },
+  { label: 'Anonymous Chat', path: '/anonymous-chat', icon: '💬', enabled: true },
   { label: 'Book Counseling', path: '/booking', icon: '📅', enabled: true },
   { label: 'Group Sessions', path: '/group-counseling', icon: '👥', enabled: true },
   { label: 'Mood Tracker', path: '/mood-tracker', icon: '📈', enabled: true },

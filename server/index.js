@@ -37,37 +37,6 @@ io.on('connection', (socket) => {
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-// Atomically claims one available Care_Credit for a resident. The second .eq('status',
-// 'available') on the update turns this into a conditional UPDATE enforced by Postgres:
-// if two requests race for the same credit, only the first actually flips it to 'used' —
-// the loser's update matches zero rows instead of silently double-spending one credit
-// across two bookings.
-async function claimCareCredit(residentId) {
-  const { data: candidates, error: findError } = await supabase
-    .from('Care_Credit')
-    .select('credit_id')
-    .eq('resident_id', residentId)
-    .eq('status', 'available')
-    .limit(1);
-
-  if (findError) throw findError;
-  if (!candidates || candidates.length === 0) return null;
-
-  const { data: claimed, error: claimError } = await supabase
-    .from('Care_Credit')
-    .update({ status: 'used' })
-    .eq('credit_id', candidates[0].credit_id)
-    .eq('status', 'available')
-    .select();
-
-  if (claimError) throw claimError;
-  return claimed && claimed.length > 0 ? claimed[0] : null;
-}
-
-async function releaseCareCredit(creditId) {
-  await supabase.from('Care_Credit').update({ status: 'available' }).eq('credit_id', creditId);
-}
-
 app.use(cors());
 app.use(express.json());
 
@@ -120,7 +89,10 @@ app.get('/psychologists', async (req, res) => {
   res.json(withPhotoUrls);
 });
 
-// POST /bookings — Booking → Care Credit check → Payment (full transaction flow)
+// POST /bookings — claim credit + create Booking + create Payment as one Postgres
+// transaction (see db/create_booking_transaction.sql). If any step fails — including
+// the unique-slot conflict — Postgres rolls back all of it, so there's never a
+// booking left without a payment, or a credit stranded as 'used' with nothing to show for it.
 app.post('/bookings', async (req, res) => {
   const { resident_id, psychologist_id, schedule } = req.body;
 
@@ -128,82 +100,23 @@ app.post('/bookings', async (req, res) => {
     return res.status(400).json({ error: 'resident_id, psychologist_id, and schedule are required' });
   }
 
-  // Step 0: look up this psychologist's own session price — pricing is per-psychologist, not flat platform-wide
-  const { data: psychologist, error: psychologistError } = await supabase
-    .from('Psychologist')
-    .select('session_price')
-    .eq('psychologist_id', psychologist_id)
-    .single();
+  const { data, error } = await supabase.rpc('create_booking_transaction', {
+    p_resident_id: resident_id,
+    p_psychologist_id: psychologist_id,
+    p_schedule: schedule,
+  });
 
-  if (psychologistError || !psychologist) {
-    return res.status(404).json({ error: 'Psychologist not found' });
-  }
-
-  const sessionPrice = Number(psychologist.session_price);
-
-  // Step 1: atomically claim an available Care_Credit (race-safe — see claimCareCredit)
-  let careCredit;
-  try {
-    careCredit = await claimCareCredit(resident_id);
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-
-  // Step 2: create the Booking, linking the care credit if one was claimed.
-  // A unique index on (psychologist_id, schedule) for non-cancelled bookings (see
-  // db/booking_slot_unique.sql) makes Postgres itself reject this insert with error
-  // code 23505 if someone else booked the exact same slot in the moment between two
-  // requests — that's the actual concurrency guard, not application-level logic.
-  const { data: bookingData, error: bookingError } = await supabase
-    .from('Booking')
-    .insert([{
-      resident_id,
-      psychologist_id,
-      schedule,
-      status: 'confirmed',
-      care_credit_id: careCredit ? careCredit.credit_id : null,
-    }])
-    .select();
-
-  if (bookingError) {
-    // Booking failed — give back the credit we claimed so it isn't stranded as 'used'
-    if (careCredit) await releaseCareCredit(careCredit.credit_id);
-
-    if (bookingError.code === '23505') {
+  if (error) {
+    if (error.message === 'PSYCHOLOGIST_NOT_FOUND') {
+      return res.status(404).json({ error: 'Psychologist not found' });
+    }
+    if (error.code === '23505') {
       return res.status(409).json({ error: 'This slot was just booked by someone else. Please pick another time.' });
     }
-    return res.status(500).json({ error: bookingError.message });
+    return res.status(500).json({ error: error.message });
   }
 
-  const booking = bookingData[0];
-
-  // Step 3: create the Payment record.
-  // 80/20 split of THIS psychologist's own session_price (not a flat ₱800/₱200 —
-  // pricing varies per psychologist, so the platform's cut must be a percentage).
-  // If a care credit covered it, the resident owes nothing and the payment is marked 'paid'.
-  const psychologistPayout = Math.round(sessionPrice * 0.8 * 100) / 100;
-  const platformFee = Math.round(sessionPrice * 0.2 * 100) / 100;
-
-  const { data: paymentData, error: paymentError } = await supabase
-    .from('Payment')
-    .insert([{
-      booking_id: booking.booking_id,
-      amount: sessionPrice,
-      platform_fee: platformFee,
-      psychologist_payout: psychologistPayout,
-      status: careCredit ? 'paid' : 'pending',
-    }])
-    .select();
-
-  if (paymentError) {
-    return res.status(500).json({ error: paymentError.message });
-  }
-
-  res.status(201).json({
-    booking,
-    care_credit_applied: !!careCredit,
-    payment: paymentData[0],
-  });
+  res.status(201).json(data);
 });
 
 // GET /care-credits/reconciliation?barangay_id=3 (barangay_id optional — omit for every barangay)
@@ -651,46 +564,23 @@ app.post('/crisis-match', async (req, res) => {
   }
 
   const psychologistId = available[0].psychologist_id;
-  const sessionPrice = Number(available[0].session_price);
 
-  // Atomically claim an available care credit — same race-safe helper as /bookings
-  let careCredit;
-  try {
-    careCredit = await claimCareCredit(user_id);
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
+  // Same atomic credit-claim + booking + payment transaction as /bookings — see
+  // db/create_booking_transaction.sql — so a crisis match can't leave an orphaned
+  // booking or a stranded credit either.
+  const { data, error } = await supabase.rpc('create_booking_transaction', {
+    p_resident_id: user_id,
+    p_psychologist_id: psychologistId,
+    p_schedule: new Date().toISOString(),
+    p_session_type: 'crisis',
+  });
 
-  const { data: bookingData, error: bookingError } = await supabase
-    .from('Booking')
-    .insert([{
-      resident_id: user_id,
-      psychologist_id: psychologistId,
-      schedule: new Date().toISOString(),
-      status: 'confirmed',
-      session_type: 'crisis',
-      care_credit_id: careCredit ? careCredit.credit_id : null,
-    }])
-    .select();
-
-  if (bookingError) {
-    if (careCredit) await releaseCareCredit(careCredit.credit_id);
-    return res.status(500).json({ error: bookingError.message });
-  }
-  const booking = bookingData[0];
-
-  await supabase.from('Payment').insert([{
-    booking_id: booking.booking_id,
-    amount: sessionPrice,
-    platform_fee: Math.round(sessionPrice * 0.2 * 100) / 100,
-    psychologist_payout: Math.round(sessionPrice * 0.8 * 100) / 100,
-    status: careCredit ? 'paid' : 'pending',
-  }]);
+  if (error) return res.status(500).json({ error: error.message });
 
   // Mark the psychologist as no longer immediately available
   await supabase.from('Psychologist').update({ is_available: false }).eq('psychologist_id', psychologistId);
 
-  res.json({ matched: true, booking });
+  res.json({ matched: true, booking: data.booking });
 });
 
 const COMPANION_SYSTEM_PROMPT = `You are a warm, supportive, non-clinical companion inside a mental wellness app called OpenUp for Cebu City residents. Respond in 2-4 sentences. Offer a simple grounding or breathing exercise if it fits naturally. Never diagnose, never use clinical labels, never claim to be a licensed professional. Match the language the person used (Bisaya, Filipino, or English) as best you can. Gently encourage reaching out to a licensed psychologist for anything serious, without being pushy or repetitive. Never invent or state specific phone numbers, hotline numbers, or emergency contact details under any circumstance — you do not actually know them; the app shows verified local crisis resources separately. If someone expresses thoughts of self-harm or suicide, respond with calm, direct empathy and gently point them toward the app's in-app option to connect with a licensed psychologist, without listing any phone numbers yourself.`;

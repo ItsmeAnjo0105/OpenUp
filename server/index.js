@@ -124,8 +124,8 @@ app.post('/bookings', async (req, res) => {
 // Verifies the Care_Credit ledger actually adds up per barangay: total issued must equal
 // available + used, and every credit marked 'used' must be linked to exactly one Booking.
 // An "orphaned" used credit (used but no booking references it) means the ledger and the
-// bookings table drifted apart — the exact failure mode the old racy claim logic could
-// have caused before claimCareCredit made claiming atomic.
+// bookings table drifted apart — the exact failure mode a racy or non-atomic claim
+// could cause; see db/create_booking_transaction.sql for how claiming is made atomic.
 app.get('/care-credits/reconciliation', async (req, res) => {
   const { barangay_id } = req.query;
 
@@ -200,6 +200,87 @@ app.get('/care-credits/reconciliation', async (req, res) => {
     );
   }
   res.json(results);
+});
+
+// POST /care-credits/allocate — issues new Care Credits. Two modes, mutually exclusive:
+//   { resident_id, amount } — issue one credit to a single resident. barangay_id is
+//     always derived from that resident's own User.barangay_id, never taken from the
+//     request body, so a credit can never be issued under a barangay the recipient
+//     doesn't actually belong to (the segregation guarantee this module is named for).
+//   { barangay_id, amount } — issue one credit of `amount` to every resident currently
+//     registered under that barangay (an LGU funding a round of credits for its own residents).
+//
+// NOTE: like every other route in this file, this endpoint has no auth/role check yet —
+// there's no admin-only gate stopping any caller from hitting it directly. Access control
+// is a separate, still-open gap across the whole API, not specific to this endpoint.
+app.post('/care-credits/allocate', async (req, res) => {
+  const { barangay_id, resident_id, amount } = req.body;
+
+  const numericAmount = Number(amount);
+  if (!amount || Number.isNaN(numericAmount) || numericAmount <= 0) {
+    return res.status(400).json({ error: 'amount must be a positive number' });
+  }
+
+  if (!barangay_id && !resident_id) {
+    return res.status(400).json({
+      error: 'either barangay_id (fund every resident there) or resident_id (fund just one) is required',
+    });
+  }
+
+  if (resident_id) {
+    const { data: resident, error: residentError } = await supabase
+      .from('User')
+      .select('user_id, barangay_id, role')
+      .eq('user_id', resident_id)
+      .single();
+
+    if (residentError || !resident) return res.status(404).json({ error: 'Resident not found' });
+    if (resident.role !== 'resident') return res.status(400).json({ error: 'This user is not a resident' });
+
+    const { data, error } = await supabase
+      .from('Care_Credit')
+      .insert([{ barangay_id: resident.barangay_id, resident_id: resident.user_id, amount: numericAmount, status: 'available' }])
+      .select();
+
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(201).json({ credits_issued: 1, total_amount: numericAmount, credits: data });
+  }
+
+  const { data: barangay, error: barangayError } = await supabase
+    .from('Barangay')
+    .select('barangay_id')
+    .eq('barangay_id', barangay_id)
+    .single();
+
+  if (barangayError || !barangay) return res.status(404).json({ error: 'Barangay not found' });
+
+  const { data: residents, error: residentsError } = await supabase
+    .from('User')
+    .select('user_id')
+    .eq('barangay_id', barangay_id)
+    .eq('role', 'resident');
+
+  if (residentsError) return res.status(500).json({ error: residentsError.message });
+
+  if (!residents || residents.length === 0) {
+    return res.status(200).json({ credits_issued: 0, total_amount: 0, message: 'No residents registered in this barangay yet' });
+  }
+
+  const rows = residents.map((r) => ({
+    barangay_id,
+    resident_id: r.user_id,
+    amount: numericAmount,
+    status: 'available',
+  }));
+
+  const { data, error } = await supabase.from('Care_Credit').insert(rows).select();
+  if (error) return res.status(500).json({ error: error.message });
+
+  res.status(201).json({
+    credits_issued: data.length,
+    total_amount: numericAmount * data.length,
+    credits: data,
+  });
 });
 
 // GET /jitsi-token/:bookingId?name=Joan&role=resident

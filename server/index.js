@@ -40,6 +40,34 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 app.use(cors());
 app.use(express.json());
 
+// Verifies the JWT /auth/login already issues and attaches its payload (user_id, role,
+// name) as req.user. /auth/login has signed these tokens since day one, but nothing
+// ever actually checked them on subsequent requests — every route just trusted whatever
+// ids were in the request body. This is the first route to actually enforce it.
+function requireAuth(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+
+  if (!token) return res.status(401).json({ error: 'Missing or invalid Authorization header' });
+
+  try {
+    req.user = jwt.verify(token, process.env.JWT_SECRET);
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+// Use after requireAuth. requireRole('admin', 'psychologist') etc.
+function requireRole(...allowedRoles) {
+  return (req, res, next) => {
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'You do not have permission to do that' });
+    }
+    next();
+  };
+}
+
 app.get('/', (req, res) => {
   res.send('Server is running');
 });
@@ -441,6 +469,13 @@ app.post('/auth/login', async (req, res) => {
       barangay_id: user.barangay_id,
     },
   });
+});
+
+// GET /auth/me — round-trips the stored token: confirms it's still valid and returns
+// who it belongs to. The frontend calls this on app load to detect an expired/invalid
+// stored token instead of silently trusting whatever's in localStorage forever.
+app.get('/auth/me', requireAuth, (req, res) => {
+  res.json({ user: req.user });
 });
 
 const CRISIS_PHRASES = [

@@ -11,6 +11,8 @@ import MoodTracker from './pages/MoodTracker';
 import GroupSessions from './pages/GroupSessions';
 import GroupSession from './pages/GroupSession';
 import Assessment from './pages/Assessment';
+import PsychologistDashboard from './pages/PsychologistDashboard';
+import AdminDashboard from './pages/AdminDashboard';
 
 function App() {
   return (
@@ -27,6 +29,8 @@ function App() {
       <Route path="/group-counseling" element={<GroupSessions />} />
       <Route path="/group-session/:groupSessionId" element={<GroupSession />} />
       <Route path="/assessment" element={<Assessment />} />
+      <Route path="/psychologist/dashboard" element={<PsychologistDashboard />} />
+      <Route path="/admin/dashboard" element={<AdminDashboard />} />
     </Routes>
   );
 }

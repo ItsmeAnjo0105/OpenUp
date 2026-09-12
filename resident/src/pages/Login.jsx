@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { API_URL } from '../config';
+import { API_URL, dashboardPathForRole } from '../config';
 
 function Login() {
   const [email, setEmail] = useState('');
@@ -30,7 +30,7 @@ function Login() {
 
       localStorage.setItem('openup_token', data.token);
       localStorage.setItem('openup_user', JSON.stringify(data.user));
-      navigate('/dashboard');
+      navigate(dashboardPathForRole(data.user.role));
     } catch {
       setError('Could not reach the server. Check your connection.');
       setLoading(false);

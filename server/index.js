@@ -37,6 +37,37 @@ io.on('connection', (socket) => {
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
+// Atomically claims one available Care_Credit for a resident. The second .eq('status',
+// 'available') on the update turns this into a conditional UPDATE enforced by Postgres:
+// if two requests race for the same credit, only the first actually flips it to 'used' —
+// the loser's update matches zero rows instead of silently double-spending one credit
+// across two bookings.
+async function claimCareCredit(residentId) {
+  const { data: candidates, error: findError } = await supabase
+    .from('Care_Credit')
+    .select('credit_id')
+    .eq('resident_id', residentId)
+    .eq('status', 'available')
+    .limit(1);
+
+  if (findError) throw findError;
+  if (!candidates || candidates.length === 0) return null;
+
+  const { data: claimed, error: claimError } = await supabase
+    .from('Care_Credit')
+    .update({ status: 'used' })
+    .eq('credit_id', candidates[0].credit_id)
+    .eq('status', 'available')
+    .select();
+
+  if (claimError) throw claimError;
+  return claimed && claimed.length > 0 ? claimed[0] : null;
+}
+
+async function releaseCareCredit(creditId) {
+  await supabase.from('Care_Credit').update({ status: 'available' }).eq('credit_id', creditId);
+}
+
 app.use(cors());
 app.use(express.json());
 
@@ -110,21 +141,19 @@ app.post('/bookings', async (req, res) => {
 
   const sessionPrice = Number(psychologist.session_price);
 
-  // Step 1: check if the resident has an available Care_Credit
-  const { data: credits, error: creditError } = await supabase
-    .from('Care_Credit')
-    .select('*')
-    .eq('resident_id', resident_id)
-    .eq('status', 'available')
-    .limit(1);
-
-  if (creditError) {
-    return res.status(500).json({ error: creditError.message });
+  // Step 1: atomically claim an available Care_Credit (race-safe — see claimCareCredit)
+  let careCredit;
+  try {
+    careCredit = await claimCareCredit(resident_id);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 
-  const careCredit = credits.length > 0 ? credits[0] : null;
-
-  // Step 2: create the Booking, linking the care credit if one was found
+  // Step 2: create the Booking, linking the care credit if one was claimed.
+  // A unique index on (psychologist_id, schedule) for non-cancelled bookings (see
+  // db/booking_slot_unique.sql) makes Postgres itself reject this insert with error
+  // code 23505 if someone else booked the exact same slot in the moment between two
+  // requests — that's the actual concurrency guard, not application-level logic.
   const { data: bookingData, error: bookingError } = await supabase
     .from('Booking')
     .insert([{
@@ -137,24 +166,18 @@ app.post('/bookings', async (req, res) => {
     .select();
 
   if (bookingError) {
+    // Booking failed — give back the credit we claimed so it isn't stranded as 'used'
+    if (careCredit) await releaseCareCredit(careCredit.credit_id);
+
+    if (bookingError.code === '23505') {
+      return res.status(409).json({ error: 'This slot was just booked by someone else. Please pick another time.' });
+    }
     return res.status(500).json({ error: bookingError.message });
   }
 
   const booking = bookingData[0];
 
-  // Step 3: if a care credit was used, mark it as 'used' so it can't be reused
-  if (careCredit) {
-    const { error: updateError } = await supabase
-      .from('Care_Credit')
-      .update({ status: 'used' })
-      .eq('credit_id', careCredit.credit_id);
-
-    if (updateError) {
-      return res.status(500).json({ error: updateError.message });
-    }
-  }
-
-  // Step 4: create the Payment record.
+  // Step 3: create the Payment record.
   // 80/20 split of THIS psychologist's own session_price (not a flat ₱800/₱200 —
   // pricing varies per psychologist, so the platform's cut must be a percentage).
   // If a care credit covered it, the resident owes nothing and the payment is marked 'paid'.
@@ -181,6 +204,89 @@ app.post('/bookings', async (req, res) => {
     care_credit_applied: !!careCredit,
     payment: paymentData[0],
   });
+});
+
+// GET /care-credits/reconciliation?barangay_id=3 (barangay_id optional — omit for every barangay)
+//
+// Verifies the Care_Credit ledger actually adds up per barangay: total issued must equal
+// available + used, and every credit marked 'used' must be linked to exactly one Booking.
+// An "orphaned" used credit (used but no booking references it) means the ledger and the
+// bookings table drifted apart — the exact failure mode the old racy claim logic could
+// have caused before claimCareCredit made claiming atomic.
+app.get('/care-credits/reconciliation', async (req, res) => {
+  const { barangay_id } = req.query;
+
+  let query = supabase.from('Care_Credit').select('credit_id, barangay_id, amount, status');
+  if (barangay_id) query = query.eq('barangay_id', barangay_id);
+
+  const { data: credits, error: creditsError } = await query;
+  if (creditsError) return res.status(500).json({ error: creditsError.message });
+
+  const usedCreditIds = credits.filter((c) => c.status === 'used').map((c) => c.credit_id);
+
+  let linkedIds = new Set();
+  if (usedCreditIds.length > 0) {
+    const { data: linkedBookings, error: bookingsError } = await supabase
+      .from('Booking')
+      .select('care_credit_id')
+      .in('care_credit_id', usedCreditIds);
+
+    if (bookingsError) return res.status(500).json({ error: bookingsError.message });
+    linkedIds = new Set(linkedBookings.map((b) => b.care_credit_id));
+  }
+
+  const byBarangay = {};
+  for (const c of credits) {
+    if (!byBarangay[c.barangay_id]) {
+      byBarangay[c.barangay_id] = {
+        barangay_id: c.barangay_id,
+        total_issued: 0,
+        total_amount_issued: 0,
+        available: 0,
+        amount_available: 0,
+        used: 0,
+        amount_used: 0,
+        other_status: 0,
+        orphaned_used_credits: 0,
+      };
+    }
+    const b = byBarangay[c.barangay_id];
+    b.total_issued += 1;
+    b.total_amount_issued += Number(c.amount);
+    if (c.status === 'available') {
+      b.available += 1;
+      b.amount_available += Number(c.amount);
+    } else if (c.status === 'used') {
+      b.used += 1;
+      b.amount_used += Number(c.amount);
+      if (!linkedIds.has(c.credit_id)) b.orphaned_used_credits += 1;
+    } else {
+      b.other_status += 1;
+    }
+  }
+
+  const results = Object.values(byBarangay).map((b) => ({
+    ...b,
+    reconciled: b.other_status === 0 && b.orphaned_used_credits === 0 && b.available + b.used === b.total_issued,
+  }));
+
+  if (barangay_id) {
+    return res.json(
+      results[0] || {
+        barangay_id: Number(barangay_id),
+        total_issued: 0,
+        total_amount_issued: 0,
+        available: 0,
+        amount_available: 0,
+        used: 0,
+        amount_used: 0,
+        other_status: 0,
+        orphaned_used_credits: 0,
+        reconciled: true,
+      }
+    );
+  }
+  res.json(results);
 });
 
 // GET /jitsi-token/:bookingId?name=Joan&role=resident
@@ -547,15 +653,13 @@ app.post('/crisis-match', async (req, res) => {
   const psychologistId = available[0].psychologist_id;
   const sessionPrice = Number(available[0].session_price);
 
-  // Check for an available care credit, same logic as your regular booking route
-  const { data: credits } = await supabase
-    .from('Care_Credit')
-    .select('*')
-    .eq('resident_id', user_id)
-    .eq('status', 'available')
-    .limit(1);
-
-  const careCredit = credits && credits.length > 0 ? credits[0] : null;
+  // Atomically claim an available care credit — same race-safe helper as /bookings
+  let careCredit;
+  try {
+    careCredit = await claimCareCredit(user_id);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 
   const { data: bookingData, error: bookingError } = await supabase
     .from('Booking')
@@ -569,12 +673,11 @@ app.post('/crisis-match', async (req, res) => {
     }])
     .select();
 
-  if (bookingError) return res.status(500).json({ error: bookingError.message });
-  const booking = bookingData[0];
-
-  if (careCredit) {
-    await supabase.from('Care_Credit').update({ status: 'used' }).eq('credit_id', careCredit.credit_id);
+  if (bookingError) {
+    if (careCredit) await releaseCareCredit(careCredit.credit_id);
+    return res.status(500).json({ error: bookingError.message });
   }
+  const booking = bookingData[0];
 
   await supabase.from('Payment').insert([{
     booking_id: booking.booking_id,

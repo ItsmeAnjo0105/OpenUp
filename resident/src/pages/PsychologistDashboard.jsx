@@ -48,7 +48,15 @@ function PsychologistDashboard() {
             <StatCard icon="📅" value={summary.today_sessions} label="Today's sessions" />
             <StatCard icon="📥" value={summary.pending_requests} label="Pending requests" />
             <StatCard icon="✅" value={summary.completed_sessions} label="Completed sessions" />
-            <StatCard icon="💰" value={`₱${summary.monthly_earnings.toLocaleString()}`} label="Monthly earnings" />
+            <StatCard
+              icon="💰"
+              value={`₱${summary.monthly_earnings_paid.toLocaleString()}`}
+              label={
+                summary.monthly_earnings_pending > 0
+                  ? `Paid this month (+₱${summary.monthly_earnings_pending.toLocaleString()} pending)`
+                  : 'Paid this month'
+              }
+            />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">

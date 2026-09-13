@@ -22,6 +22,7 @@ import PsychologistReports from './pages/PsychologistReports';
 import PsychologistProfile from './pages/PsychologistProfile';
 import AdminDashboard from './pages/AdminDashboard';
 import AnonymousChat from './pages/AnonymousChat';
+import PaymentResult from './pages/PaymentResult';
 
 function App() {
   return (
@@ -49,6 +50,7 @@ function App() {
       <Route path="/psychologist/profile" element={<PsychologistProfile />} />
       <Route path="/admin/dashboard" element={<AdminDashboard />} />
       <Route path="/anonymous-chat" element={<AnonymousChat />} />
+      <Route path="/payment/result" element={<PaymentResult />} />
     </Routes>
   );
 }

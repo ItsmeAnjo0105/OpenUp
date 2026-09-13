@@ -40,6 +40,30 @@ function Dashboard() {
     loadMoodEntries();
   }, [user, navigate]);
 
+  const [payingId, setPayingId] = useState(null);
+  const [payError, setPayError] = useState('');
+
+  const handlePay = async (paymentId) => {
+    setPayError('');
+    setPayingId(paymentId);
+    try {
+      const res = await fetch(`${API_URL}/payments/${paymentId}/checkout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('openup_token')}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPayError(data.error || 'Could not start checkout.');
+        setPayingId(null);
+        return;
+      }
+      window.location.href = data.checkout_url;
+    } catch {
+      setPayError('Could not reach the server.');
+      setPayingId(null);
+    }
+  };
+
   const handleLogMood = async (level) => {
     setSavingMood(true);
     try {
@@ -170,6 +194,51 @@ function Dashboard() {
             >
               Join
             </Link>
+          </div>
+        )}
+
+        {bookings.length > 0 && (
+          <div className="bg-brand-surface rounded-2xl shadow-sm p-6">
+            <p className="font-medium mb-4">Your bookings</p>
+            {payError && <p className="text-sm text-red-600 mb-3">{payError}</p>}
+            <div className="space-y-3">
+              {bookings.map((b) => {
+                const payment = b.Payment?.[0];
+                return (
+                  <div
+                    key={b.booking_id}
+                    className="border border-brand-ink/10 rounded-xl p-4 flex items-center justify-between"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold">
+                        {b.Psychologist?.User?.name || `Psychologist #${b.psychologist_id}`}
+                      </p>
+                      <p className="text-xs text-brand-ink/60 mt-1">
+                        {new Date(b.schedule).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}
+                        {' · '}
+                        <span className="capitalize">{b.status}</span>
+                      </p>
+                    </div>
+                    {payment && payment.status === 'pending' && (
+                      <button
+                        onClick={() => handlePay(payment.payment_id)}
+                        disabled={payingId === payment.payment_id}
+                        className="text-xs font-medium px-3 py-1.5 rounded-full bg-brand-primary text-white disabled:opacity-60"
+                      >
+                        {payingId === payment.payment_id
+                          ? 'Redirecting...'
+                          : `Pay ₱${Number(payment.amount).toLocaleString()}`}
+                      </button>
+                    )}
+                    {payment && payment.status === 'paid' && (
+                      <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-green-100 text-green-700">
+                        Paid
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 

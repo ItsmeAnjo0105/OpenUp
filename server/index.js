@@ -130,12 +130,125 @@ app.get('/bookings/user/:userId', async (req, res) => {
 
   const { data, error } = await supabase
     .from('Booking')
-    .select('*, Psychologist(psychologist_id, license_no, User(name))')
+    .select('*, Psychologist(psychologist_id, license_no, User(name)), Payment(payment_id, amount, status)')
     .eq('resident_id', userId)
     .order('schedule', { ascending: true });
 
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
+});
+
+// PayMongo Checkout Sessions: PayMongo hosts the actual payment page (card entry or
+// GCash QR) so we never touch raw card details. Basic Auth with the secret key as
+// username and an empty password, base64-encoded, is PayMongo's documented auth scheme.
+async function paymongoRequest(method, path, body) {
+  const auth = Buffer.from(`${process.env.PAYMONGO_SECRET_KEY}:`).toString('base64');
+  const res = await fetch(`https://api.paymongo.com/v1${path}`, {
+    method,
+    headers: {
+      Authorization: `Basic ${auth}`,
+      'Content-Type': 'application/json',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.errors?.[0]?.detail || 'PayMongo request failed');
+  return data;
+}
+
+// Verifies the caller (resident or the psychologist on the booking) actually owns
+// this Payment before letting them start or check on a checkout for it.
+async function getPaymentIfOwned(paymentId, user) {
+  const { data: payment, error } = await supabase
+    .from('Payment')
+    .select('*, Booking(resident_id, psychologist_id)')
+    .eq('payment_id', paymentId)
+    .single();
+
+  if (error || !payment) return null;
+  if (user.role === 'resident' && payment.Booking.resident_id === user.user_id) return payment;
+
+  if (user.role === 'psychologist') {
+    const { data: psychologist } = await supabase
+      .from('Psychologist')
+      .select('psychologist_id')
+      .eq('user_id', user.user_id)
+      .single();
+    if (psychologist && psychologist.psychologist_id === payment.Booking.psychologist_id) return payment;
+  }
+
+  return null;
+}
+
+// POST /payments/:id/checkout — creates a PayMongo Checkout Session for a 'pending'
+// Payment and returns its checkout_url for the browser to redirect to.
+app.post('/payments/:id/checkout', requireAuth, requireRole('resident'), async (req, res) => {
+  const payment = await getPaymentIfOwned(req.params.id, req.user);
+  if (!payment) return res.status(404).json({ error: 'Payment not found' });
+  if (payment.status !== 'pending') return res.status(409).json({ error: 'This payment is not pending' });
+
+  try {
+    const session = await paymongoRequest('POST', '/checkout_sessions', {
+      data: {
+        attributes: {
+          send_email_receipt: false,
+          show_description: true,
+          show_line_items: true,
+          line_items: [
+            {
+              currency: 'PHP',
+              amount: Math.round(Number(payment.amount) * 100), // PayMongo uses centavos
+              name: 'OpenUp counseling session',
+              quantity: 1,
+            },
+          ],
+          payment_method_types: ['card', 'gcash', 'paymaya'],
+          success_url: `${process.env.FRONTEND_URL}/payment/result?payment_id=${payment.payment_id}&status=success`,
+          cancel_url: `${process.env.FRONTEND_URL}/payment/result?payment_id=${payment.payment_id}&status=cancelled`,
+        },
+      },
+    });
+
+    await supabase
+      .from('Payment')
+      .update({ paymongo_checkout_session_id: session.data.id })
+      .eq('payment_id', payment.payment_id);
+
+    res.json({ checkout_url: session.data.attributes.checkout_url });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// GET /payments/:id/sync — call after the resident returns from PayMongo's checkout
+// page. Looks up the real status directly from PayMongo (source of truth) rather than
+// trusting the success/cancel redirect alone, which a user could reach without paying.
+app.get('/payments/:id/sync', requireAuth, async (req, res) => {
+  const payment = await getPaymentIfOwned(req.params.id, req.user);
+  if (!payment) return res.status(404).json({ error: 'Payment not found' });
+
+  if (payment.status !== 'pending' || !payment.paymongo_checkout_session_id) {
+    return res.json({ status: payment.status });
+  }
+
+  try {
+    const session = await paymongoRequest('GET', `/checkout_sessions/${payment.paymongo_checkout_session_id}`);
+    const paid = (session.data.attributes.payments || []).some((p) => p.attributes.status === 'paid');
+
+    if (paid) {
+      const { data, error } = await supabase
+        .from('Payment')
+        .update({ status: 'paid' })
+        .eq('payment_id', payment.payment_id)
+        .select();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ status: data[0].status });
+    }
+
+    res.json({ status: payment.status });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
 });
 
 app.get('/psychologists', async (req, res) => {
@@ -421,19 +534,25 @@ app.get('/psychologists/me/dashboard-summary', requireAuth, requireRole('psychol
   const completedSessions = confirmedBookings.filter((b) => new Date(b.schedule) < now);
   const pendingRequests = bookings.filter((b) => b.status === 'pending');
 
-  // Monthly earnings: this psychologist's payout share for sessions scheduled this month
+  // Monthly earnings: only count Payment rows actually marked 'paid' as earned. A
+  // 'pending' payment is money the resident hasn't paid yet -- counting it as
+  // "earnings" would claim money that was never actually received.
   const thisMonthBookingIds = confirmedBookings
     .filter((b) => b.schedule.slice(0, 7) === currentMonthKey)
     .map((b) => b.booking_id);
 
-  let monthlyEarnings = 0;
+  let monthlyEarningsPaid = 0;
+  let monthlyEarningsPending = 0;
   if (thisMonthBookingIds.length > 0) {
     const { data: payments, error: paymentsError } = await supabase
       .from('Payment')
-      .select('booking_id, psychologist_payout')
+      .select('booking_id, psychologist_payout, status')
       .in('booking_id', thisMonthBookingIds);
     if (paymentsError) return res.status(500).json({ error: paymentsError.message });
-    monthlyEarnings = payments.reduce((sum, p) => sum + Number(p.psychologist_payout), 0);
+    for (const p of payments) {
+      if (p.status === 'paid') monthlyEarningsPaid += Number(p.psychologist_payout);
+      else if (p.status === 'pending') monthlyEarningsPending += Number(p.psychologist_payout);
+    }
   }
 
   // Appointments per month: last 7 months including the current one, counting any
@@ -496,7 +615,8 @@ app.get('/psychologists/me/dashboard-summary', requireAuth, requireRole('psychol
     today_sessions: todaysSessions.length,
     pending_requests: pendingRequests.length,
     completed_sessions: completedSessions.length,
-    monthly_earnings: monthlyEarnings,
+    monthly_earnings_paid: monthlyEarningsPaid,
+    monthly_earnings_pending: monthlyEarningsPending,
     appointments_per_month: appointmentsPerMonth,
     mood_distribution:
       classifiedCount > 0

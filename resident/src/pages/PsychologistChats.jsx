@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import PsychologistLayout from '../components/PsychologistLayout';
 import ChatPanel from '../components/ChatPanel';
-import { API_URL, authHeader } from '../config';
+import CounselingSession from '../CounselingSession';
+import { API_URL, authHeader, getStoredUser } from '../config';
 
 function anonymizeResidentId(residentId) {
   return `Anonymous #${1000 + Number(residentId)}`;
@@ -11,6 +12,8 @@ function PsychologistChats() {
   const [sessions, setSessions] = useState([]);
   const [error, setError] = useState('');
   const [chattingWith, setChattingWith] = useState(null);
+  const [inCallWith, setInCallWith] = useState(null);
+  const user = getStoredUser();
 
   useEffect(() => {
     fetch(`${API_URL}/psychologists/me/bookings?status=confirmed`, { headers: authHeader() })
@@ -43,13 +46,26 @@ function PsychologistChats() {
                     <p className="text-sm font-semibold">{anonymizeResidentId(s.resident_id)}</p>
                     <p className="text-xs text-brand-ink/60 mt-1">{new Date(s.schedule).toLocaleString()}</p>
                   </div>
-                  <button
-                    onClick={() => setChattingWith(chattingWith === s.booking_id ? null : s.booking_id)}
-                    className="text-xs font-medium px-3 py-1.5 rounded-full border border-brand-ink/20"
-                  >
-                    {chattingWith === s.booking_id ? 'Close chat' : 'Chat'}
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setInCallWith(inCallWith === s.booking_id ? null : s.booking_id)}
+                      className="text-xs font-medium px-3 py-1.5 rounded-full bg-brand-primary text-white"
+                    >
+                      {inCallWith === s.booking_id ? 'End call' : '📞 Audio call'}
+                    </button>
+                    <button
+                      onClick={() => setChattingWith(chattingWith === s.booking_id ? null : s.booking_id)}
+                      className="text-xs font-medium px-3 py-1.5 rounded-full border border-brand-ink/20"
+                    >
+                      {chattingWith === s.booking_id ? 'Close chat' : 'Chat'}
+                    </button>
+                  </div>
                 </div>
+                {inCallWith === s.booking_id && (
+                  <div className="mt-2">
+                    <CounselingSession bookingId={s.booking_id} name={user.name} role={user.role} />
+                  </div>
+                )}
                 {chattingWith === s.booking_id && (
                   <div className="mt-2">
                     <ChatPanel bookingId={s.booking_id} myRole="psychologist" />

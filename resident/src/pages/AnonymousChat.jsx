@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import ChatPanel from '../components/ChatPanel';
+import CounselingSession from '../CounselingSession';
 import { API_URL } from '../config';
 
 function AnonymousChat() {
   const [bookings, setBookings] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [inCall, setInCall] = useState(false);
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   useEffect(() => {
@@ -19,6 +21,13 @@ function AnonymousChat() {
       })
       .catch(() => {});
   }, []);
+
+  const selectedBooking = bookings.find((b) => b.booking_id === selected);
+
+  const selectBooking = (bookingId) => {
+    setSelected(bookingId);
+    setInCall(false);
+  };
 
   return (
     <Layout>
@@ -38,7 +47,7 @@ function AnonymousChat() {
               {bookings.map((b) => (
                 <button
                   key={b.booking_id}
-                  onClick={() => setSelected(b.booking_id)}
+                  onClick={() => selectBooking(b.booking_id)}
                   className={`text-sm px-4 py-2 rounded-full border ${
                     selected === b.booking_id
                       ? 'bg-brand-primary text-white border-brand-primary'
@@ -51,7 +60,24 @@ function AnonymousChat() {
               ))}
             </div>
 
-            {selected && <ChatPanel bookingId={selected} myRole="resident" />}
+            {selectedBooking && (
+              <>
+                {selectedBooking.status === 'confirmed' && (
+                  <button
+                    onClick={() => setInCall((v) => !v)}
+                    className="text-sm font-medium px-4 py-2 rounded-full bg-brand-primary text-white"
+                  >
+                    {inCall ? 'End audio call' : '📞 Start audio call'}
+                  </button>
+                )}
+
+                {inCall && (
+                  <CounselingSession bookingId={selectedBooking.booking_id} name={user.name} role={user.role} />
+                )}
+
+                <ChatPanel bookingId={selectedBooking.booking_id} myRole="resident" />
+              </>
+            )}
           </div>
         )}
       </div>

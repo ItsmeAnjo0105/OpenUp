@@ -11,8 +11,12 @@ function AnonymousChat() {
   useEffect(() => {
     if (!user) return;
     fetch(`${API_URL}/bookings/user/${user.user_id}`)
-      .then((res) => res.json())
-      .then((data) => setBookings(data.filter((b) => b.status === 'pending' || b.status === 'confirmed')))
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (ok && Array.isArray(data)) {
+          setBookings(data.filter((b) => b.status === 'pending' || b.status === 'confirmed'));
+        }
+      })
       .catch(() => {});
   }, []);
 

@@ -361,6 +361,125 @@ app.get('/psychologists/me/bookings', requireAuth, requireRole('psychologist'), 
   res.json(data);
 });
 
+// GET /psychologists/me/dashboard-summary — stats + charts for the Dashboard home page.
+app.get('/psychologists/me/dashboard-summary', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { data: psychologist, error: psychError } = await supabase
+    .from('Psychologist')
+    .select('psychologist_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  if (psychError || !psychologist) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data: bookings, error: bookingsError } = await supabase
+    .from('Booking')
+    .select('booking_id, resident_id, schedule, status')
+    .eq('psychologist_id', psychologist.psychologist_id);
+
+  if (bookingsError) return res.status(500).json({ error: bookingsError.message });
+
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+  const currentMonthKey = now.toISOString().slice(0, 7);
+
+  const confirmedBookings = bookings.filter((b) => b.status === 'confirmed');
+  const todaysSessions = confirmedBookings.filter((b) => b.schedule.slice(0, 10) === todayStr);
+  const completedSessions = confirmedBookings.filter((b) => new Date(b.schedule) < now);
+  const pendingRequests = bookings.filter((b) => b.status === 'pending');
+
+  // Monthly earnings: this psychologist's payout share for sessions scheduled this month
+  const thisMonthBookingIds = confirmedBookings
+    .filter((b) => b.schedule.slice(0, 7) === currentMonthKey)
+    .map((b) => b.booking_id);
+
+  let monthlyEarnings = 0;
+  if (thisMonthBookingIds.length > 0) {
+    const { data: payments, error: paymentsError } = await supabase
+      .from('Payment')
+      .select('booking_id, psychologist_payout')
+      .in('booking_id', thisMonthBookingIds);
+    if (paymentsError) return res.status(500).json({ error: paymentsError.message });
+    monthlyEarnings = payments.reduce((sum, p) => sum + Number(p.psychologist_payout), 0);
+  }
+
+  // Appointments per month: last 7 months including the current one, counting any
+  // live (non-cancelled/declined) booking regardless of status. Everything here uses
+  // UTC consistently (both the key AND its label) -- schedule strings from Postgres are
+  // UTC, so building the key from a *local* Date (new Date(y, m, 1)) shifted the whole
+  // window by a day/month in timezones ahead of UTC (e.g. Philippines, UTC+8), silently
+  // dropping the current month's bookings because the key no longer matched.
+  const monthKeys = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    monthKeys.push({
+      key: d.toISOString().slice(0, 7),
+      label: d.toLocaleString('default', { month: 'short', timeZone: 'UTC' }),
+    });
+  }
+  const monthCounts = Object.fromEntries(monthKeys.map((m) => [m.key, 0]));
+  bookings
+    .filter((b) => b.status !== 'cancelled' && b.status !== 'declined')
+    .forEach((b) => {
+      const key = b.schedule.slice(0, 7);
+      if (key in monthCounts) monthCounts[key] += 1;
+    });
+  const appointmentsPerMonth = monthKeys.map((m) => ({ month: m.label, count: monthCounts[m.key] }));
+
+  // Mood distribution: for each distinct resident with a confirmed booking here,
+  // compare their two most recent Mood_Entry rows. Needs at least 2 entries to
+  // classify at all -- a client with 0 or 1 entries is left out rather than guessed at.
+  const clientIds = [...new Set(confirmedBookings.map((b) => b.resident_id))];
+  let improving = 0;
+  let stable = 0;
+  let needsAttention = 0;
+
+  if (clientIds.length > 0) {
+    const { data: moodEntries, error: moodError } = await supabase
+      .from('Mood_Entry')
+      .select('user_id, mood_level, created_at')
+      .in('user_id', clientIds)
+      .order('created_at', { ascending: false });
+
+    if (!moodError && moodEntries) {
+      const latestTwoByUser = {};
+      for (const entry of moodEntries) {
+        if (!latestTwoByUser[entry.user_id]) latestTwoByUser[entry.user_id] = [];
+        if (latestTwoByUser[entry.user_id].length < 2) latestTwoByUser[entry.user_id].push(entry.mood_level);
+      }
+      for (const clientId of clientIds) {
+        const [latest, previous] = latestTwoByUser[clientId] || [];
+        if (latest == null || previous == null) continue;
+        if (latest > previous) improving += 1;
+        else if (latest < previous) needsAttention += 1;
+        else stable += 1;
+      }
+    }
+  }
+
+  const classifiedCount = improving + stable + needsAttention;
+
+  res.json({
+    today_sessions: todaysSessions.length,
+    pending_requests: pendingRequests.length,
+    completed_sessions: completedSessions.length,
+    monthly_earnings: monthlyEarnings,
+    appointments_per_month: appointmentsPerMonth,
+    mood_distribution:
+      classifiedCount > 0
+        ? {
+            improving: Math.round((improving / classifiedCount) * 100),
+            stable: Math.round((stable / classifiedCount) * 100),
+            needs_attention: Math.round((needsAttention / classifiedCount) * 100),
+          }
+        : null,
+    todays_sessions_detail: todaysSessions.map((b) => ({
+      booking_id: b.booking_id,
+      resident_id: b.resident_id,
+      schedule: b.schedule,
+    })),
+  });
+});
+
 // POST /bookings/:id/accept — confirms the request: consumes the reserved credit (if
 // any) and creates the Payment. See db/booking_accept_decline.sql.
 app.post('/bookings/:id/accept', requireAuth, requireRole('psychologist'), async (req, res) => {

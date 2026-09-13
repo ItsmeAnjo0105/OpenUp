@@ -24,33 +24,45 @@ function AdminDashboard() {
 
   const loadPending = () => {
     fetch(`${API_URL}/admin/psychologists?status=pending`, { headers: authHeader() })
-      .then((res) => res.json())
-      .then(setPending)
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (ok && Array.isArray(data)) setPending(data);
+        else setActionError(data?.error || 'Could not load pending applications.');
+      })
       .catch(() => setActionError('Could not load pending applications.'));
   };
 
   const loadBookings = () => {
     fetch(`${API_URL}/admin/bookings`, { headers: authHeader() })
-      .then((res) => res.json())
-      .then(setBookings)
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (ok && Array.isArray(data)) setBookings(data);
+        else setBookingError(data?.error || 'Could not load bookings.');
+      })
       .catch(() => setBookingError('Could not load bookings.'));
   };
 
   const loadVerifiedPsychologists = () => {
     fetch(`${API_URL}/admin/psychologists?status=verified`, { headers: authHeader() })
-      .then((res) => res.json())
-      .then(setVerifiedPsychologists)
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (ok && Array.isArray(data)) setVerifiedPsychologists(data);
+      })
       .catch(() => {});
   };
 
   const loadFinance = () => {
     Promise.all([
-      fetch(`${API_URL}/admin/subscriptions`, { headers: authHeader() }).then((r) => r.json()),
-      fetch(`${API_URL}/admin/budgets`, { headers: authHeader() }).then((r) => r.json()),
+      fetch(`${API_URL}/admin/subscriptions`, { headers: authHeader() }).then((res) => res.json().then((data) => ({ ok: res.ok, data }))),
+      fetch(`${API_URL}/admin/budgets`, { headers: authHeader() }).then((res) => res.json().then((data) => ({ ok: res.ok, data }))),
     ])
-      .then(([subs, budgets]) => {
-        const budgetByBarangay = Object.fromEntries(budgets.map((b) => [b.barangay_id, b]));
-        setFinance(subs.map((s) => ({ ...s, ...budgetByBarangay[s.barangay_id] })));
+      .then(([subsResult, budgetsResult]) => {
+        if (!subsResult.ok || !Array.isArray(subsResult.data) || !budgetsResult.ok || !Array.isArray(budgetsResult.data)) {
+          setFinanceError(subsResult.data?.error || budgetsResult.data?.error || 'Could not load barangay finance data.');
+          return;
+        }
+        const budgetByBarangay = Object.fromEntries(budgetsResult.data.map((b) => [b.barangay_id, b]));
+        setFinance(subsResult.data.map((s) => ({ ...s, ...budgetByBarangay[s.barangay_id] })));
       })
       .catch(() => setFinanceError('Could not load barangay finance data.'));
   };

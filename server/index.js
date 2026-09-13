@@ -171,6 +171,40 @@ app.get('/psychologists/me', requireAuth, requireRole('psychologist'), async (re
   res.json(data);
 });
 
+// PATCH /psychologists/me — self-editable profile fields only. license_no, credentials,
+// is_verified, and is_available stay controlled by signup/admin verification and are
+// deliberately not accepted here.
+app.patch('/psychologists/me', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { specialties, years_experience, languages, availability, session_price } = req.body;
+
+  const updates = {};
+  if (specialties !== undefined) updates.specialties = specialties;
+  if (languages !== undefined) updates.languages = languages;
+  if (availability !== undefined) updates.availability = availability;
+
+  if (years_experience !== undefined) {
+    updates.years_experience = years_experience === '' || years_experience === null ? null : Number(years_experience);
+  }
+
+  if (session_price !== undefined) {
+    const price = Number(session_price);
+    if (!price || price <= 0) return res.status(400).json({ error: 'session_price must be a positive number' });
+    updates.session_price = price;
+  }
+
+  if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Nothing to update' });
+
+  const { data, error } = await supabase
+    .from('Psychologist')
+    .update(updates)
+    .eq('user_id', req.user.user_id)
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data || data.length === 0) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+  res.json(data[0]);
+});
+
 // GET /admin/psychologists?status=pending|verified|all (default: pending)
 app.get('/admin/psychologists', requireAuth, requireRole('admin'), async (req, res) => {
   const status = req.query.status || 'pending';

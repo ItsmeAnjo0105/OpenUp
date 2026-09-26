@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { API_URL } from '../config';
+import { formatHour12 } from '../utils/time';
 
 const DAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const MONTH_LABELS = [
@@ -151,7 +152,7 @@ function BookingCalendar({ psychologistId, onSelect }) {
                     : 'border-brand-ink/15 text-brand-ink/70 hover:border-brand-primary'
                 }`}
               >
-                {slot}
+                {formatHour12(slot)}
               </button>
             ))}
           </div>

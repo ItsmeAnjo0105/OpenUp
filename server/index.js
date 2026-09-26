@@ -600,6 +600,119 @@ app.delete('/psychologists/me/availability/:id', requireAuth, requireRole('psych
   res.json({ deleted: true });
 });
 
+// Date-specific overrides on top of the weekly pattern above -- a psychologist
+// picks an actual calendar date (not just a weekday) to add one-off hours or
+// mark a day off. Any override row for a date makes the weekly pattern for
+// that date irrelevant (see db/psychologist_date_overrides.sql).
+app.get('/psychologists/me/date-overrides', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { month } = req.query;
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ error: 'month must be in YYYY-MM format' });
+  }
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const [year, monthNum] = month.split('-').map(Number);
+  const lastDay = String(new Date(Date.UTC(year, monthNum, 0)).getUTCDate()).padStart(2, '0');
+
+  const { data, error } = await supabase
+    .from('Psychologist_Date_Override')
+    .select('*')
+    .eq('psychologist_id', psychologistId)
+    .gte('date', `${month}-01`)
+    .lte('date', `${month}-${lastDay}`)
+    .order('date', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/psychologists/me/date-overrides', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { date, start_time, end_time } = req.body;
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !start_time || !end_time) {
+    return res.status(400).json({ error: 'date, start_time, and end_time are required' });
+  }
+  if (start_time >= end_time) return res.status(400).json({ error: 'start_time must be before end_time' });
+
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  // A date marked closed can't also gain a window -- clear the closed marker first.
+  await supabase
+    .from('Psychologist_Date_Override')
+    .delete()
+    .eq('psychologist_id', psychologistId)
+    .eq('date', date)
+    .eq('is_closed', true);
+
+  const { data, error } = await supabase
+    .from('Psychologist_Date_Override')
+    .insert([{ psychologist_id: psychologistId, date, start_time, end_time, is_closed: false }])
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data[0]);
+});
+
+app.post('/psychologists/me/date-overrides/close', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { date } = req.body;
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ error: 'date is required' });
+  }
+
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  // Closed replaces any custom windows already set for that date.
+  await supabase.from('Psychologist_Date_Override').delete().eq('psychologist_id', psychologistId).eq('date', date);
+
+  const { data, error } = await supabase
+    .from('Psychologist_Date_Override')
+    .insert([{ psychologist_id: psychologistId, date, is_closed: true }])
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data[0]);
+});
+
+app.delete('/psychologists/me/date-overrides/:id', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data: existing, error: findError } = await supabase
+    .from('Psychologist_Date_Override')
+    .select('psychologist_id')
+    .eq('override_id', req.params.id)
+    .single();
+
+  if (findError || !existing) return res.status(404).json({ error: 'Override not found' });
+  if (existing.psychologist_id !== psychologistId) return res.status(403).json({ error: 'This is not your override' });
+
+  const { error } = await supabase.from('Psychologist_Date_Override').delete().eq('override_id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ deleted: true });
+});
+
+// Clears every override for one date at once, i.e. "reset this date back to my weekly default".
+app.delete('/psychologists/me/date-overrides', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { date } = req.query;
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ error: 'date is required' });
+  }
+
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { error } = await supabase
+    .from('Psychologist_Date_Override')
+    .delete()
+    .eq('psychologist_id', psychologistId)
+    .eq('date', date);
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ deleted: true });
+});
+
 // Availability windows are defined in Philippines local time (Asia/Manila, UTC+8)
 // by convention -- the app has no users outside that timezone, and Booking.schedule
 // is stored as a real UTC instant, so an explicit +08:00 offset here is what
@@ -628,6 +741,15 @@ app.get('/psychologists/:id/availability', async (req, res) => {
   const daysInMonth = new Date(Date.UTC(year, monthNum, 0)).getUTCDate();
   const lastDay = String(daysInMonth).padStart(2, '0');
 
+  const { data: overrides, error: overridesError } = await supabase
+    .from('Psychologist_Date_Override')
+    .select('date, is_closed, start_time, end_time')
+    .eq('psychologist_id', req.params.id)
+    .gte('date', `${month}-01`)
+    .lte('date', `${month}-${lastDay}`);
+
+  if (overridesError) return res.status(500).json({ error: overridesError.message });
+
   const { data: bookings, error: bookingsError } = await supabase
     .from('Booking')
     .select('schedule')
@@ -645,13 +767,27 @@ app.get('/psychologists/:id/availability', async (req, res) => {
     (windowsByDay[w.day_of_week] ||= []).push(w);
   }
 
+  const overridesByDate = {};
+  for (const o of overrides) {
+    (overridesByDate[o.date] ||= []).push(o);
+  }
+
   const now = new Date();
   const result = {};
 
   for (let day = 1; day <= daysInMonth; day++) {
     const dateStr = `${month}-${String(day).padStart(2, '0')}`;
-    const dow = phLocalInstant(dateStr, 12).getUTCDay(); // midday sidesteps any offset edge case
-    const dayWindows = windowsByDay[dow] || [];
+    const dateOverrides = overridesByDate[dateStr];
+
+    // A date with any override row ignores the weekly pattern entirely --
+    // either it's a day off (is_closed), or its own custom window list.
+    let dayWindows;
+    if (dateOverrides) {
+      dayWindows = dateOverrides[0].is_closed ? [] : dateOverrides;
+    } else {
+      const dow = phLocalInstant(dateStr, 12).getUTCDay(); // midday sidesteps any offset edge case
+      dayWindows = windowsByDay[dow] || [];
+    }
 
     const slotSet = new Set();
     for (const w of dayWindows) {
@@ -666,7 +802,7 @@ app.get('/psychologists/:id/availability', async (req, res) => {
     }
 
     const slots = [...slotSet].sort();
-    result[dateStr] = { available: slots.length > 0, slots };
+    result[dateStr] = { available: slots.length > 0, slots, customized: !!dateOverrides };
   }
 
   res.json(result);

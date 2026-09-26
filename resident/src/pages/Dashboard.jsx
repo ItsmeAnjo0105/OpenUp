@@ -71,7 +71,7 @@ function Dashboard() {
 
   const confirmCancelBooking = (bookingId) => {
     setConfirmDialog({
-      title: 'Cancel this booking?',
+      title: 'Are you sure you want to cancel this booking?',
       message: "This can't be undone. Any Care Credit or payment tied to it will be released.",
       confirmLabel: 'Cancel booking',
       onConfirm: () => handleCancelBooking(bookingId),

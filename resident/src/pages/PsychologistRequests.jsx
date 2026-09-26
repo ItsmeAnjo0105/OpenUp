@@ -40,7 +40,7 @@ function PsychologistRequests() {
 
   const confirmDecline = (booking) => {
     setConfirmDialog({
-      title: 'Decline this request?',
+      title: 'Are you sure you want to decline this request?',
       message: `${booking.User?.name || 'This resident'}'s request will be declined and any reserved Care Credit released back to them.`,
       confirmLabel: 'Decline',
       onConfirm: () => act(booking.booking_id, 'decline'),

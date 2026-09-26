@@ -114,7 +114,7 @@ function Profile() {
 
   const confirmRemoveContact = (contactId, name) => {
     setConfirmDialog({
-      title: `Remove ${name}?`,
+      title: `Are you sure you want to remove ${name}?`,
       message: "You won't be able to alert them from the AI Crisis Companion anymore.",
       confirmLabel: 'Remove',
       onConfirm: () => removeContact(contactId),

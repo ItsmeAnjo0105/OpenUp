@@ -131,7 +131,7 @@ function AdminDashboard() {
 
   const confirmCancelBooking = (booking) => {
     setConfirmDialog({
-      title: 'Cancel this booking?',
+      title: 'Are you sure you want to cancel this booking?',
       message: `${booking.User?.name || 'This resident'}'s booking will be cancelled and any credit or payment released.`,
       confirmLabel: 'Cancel booking',
       onConfirm: () => cancelBooking(booking.booking_id),
@@ -140,7 +140,7 @@ function AdminDashboard() {
 
   const confirmReject = (psychologist) => {
     setConfirmDialog({
-      title: 'Reject this application?',
+      title: 'Are you sure you want to reject this application?',
       message: `${psychologist.User?.name || 'This applicant'}'s account will be marked rejected.`,
       confirmLabel: 'Reject',
       onConfirm: () => act(psychologist.psychologist_id, 'reject'),

@@ -76,7 +76,7 @@ function CommentThread({ testimonialId, currentUserId }) {
 
   const confirmRemove = (commentId) => {
     setConfirmDialog({
-      title: 'Delete this comment?',
+      title: 'Are you sure you want to delete this comment?',
       message: "This can't be undone.",
       confirmLabel: 'Delete',
       onConfirm: () => remove(commentId),
@@ -204,7 +204,7 @@ function Community() {
 
   const confirmRemove = (testimonialId) => {
     setConfirmDialog({
-      title: 'Delete this post?',
+      title: 'Are you sure you want to delete this post?',
       message: "This can't be undone, and its comments will be deleted too.",
       confirmLabel: 'Delete',
       onConfirm: () => remove(testimonialId),

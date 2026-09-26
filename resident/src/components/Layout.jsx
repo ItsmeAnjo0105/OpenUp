@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import Sidebar from './Sidebar';
+import ReminderBanner from './ReminderBanner';
 
 function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
     <div className="flex min-h-screen bg-brand-bg">
+      <ReminderBanner />
       <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 
       {sidebarOpen && (

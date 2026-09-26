@@ -539,6 +539,139 @@ app.patch('/psychologists/me', requireAuth, requireRole('psychologist'), async (
   res.json(data[0]);
 });
 
+// Weekly recurring availability windows. Distinct from Psychologist.availability
+// (a free-text display string on the profile) -- this table is the real,
+// structured schedule that actually drives which slots a resident can book.
+async function getOwnPsychologistId(userId) {
+  const { data } = await supabase.from('Psychologist').select('psychologist_id').eq('user_id', userId).single();
+  return data?.psychologist_id || null;
+}
+
+app.get('/psychologists/me/availability', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data, error } = await supabase
+    .from('Psychologist_Availability')
+    .select('*')
+    .eq('psychologist_id', psychologistId)
+    .order('day_of_week', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/psychologists/me/availability', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { day_of_week, start_time, end_time } = req.body;
+
+  if (day_of_week === undefined || day_of_week === null || !start_time || !end_time) {
+    return res.status(400).json({ error: 'day_of_week, start_time, and end_time are required' });
+  }
+  if (day_of_week < 0 || day_of_week > 6) return res.status(400).json({ error: 'day_of_week must be 0-6' });
+  if (start_time >= end_time) return res.status(400).json({ error: 'start_time must be before end_time' });
+
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data, error } = await supabase
+    .from('Psychologist_Availability')
+    .insert([{ psychologist_id: psychologistId, day_of_week, start_time, end_time }])
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data[0]);
+});
+
+app.delete('/psychologists/me/availability/:id', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data: existing, error: findError } = await supabase
+    .from('Psychologist_Availability')
+    .select('psychologist_id')
+    .eq('availability_id', req.params.id)
+    .single();
+
+  if (findError || !existing) return res.status(404).json({ error: 'Availability window not found' });
+  if (existing.psychologist_id !== psychologistId) return res.status(403).json({ error: 'This is not your availability window' });
+
+  const { error } = await supabase.from('Psychologist_Availability').delete().eq('availability_id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ deleted: true });
+});
+
+// Availability windows are defined in Philippines local time (Asia/Manila, UTC+8)
+// by convention -- the app has no users outside that timezone, and Booking.schedule
+// is stored as a real UTC instant, so an explicit +08:00 offset here is what
+// correctly converts one to the other in both directions.
+function phLocalInstant(dateStr, hour) {
+  return new Date(`${dateStr}T${String(hour).padStart(2, '0')}:00:00+08:00`);
+}
+
+// GET /psychologists/:id/availability?month=YYYY-MM — for the resident's booking
+// calendar: which dates have any free slot, and exactly which hour slots are free,
+// after subtracting existing (non-cancelled/declined) bookings and past times.
+app.get('/psychologists/:id/availability', async (req, res) => {
+  const { month } = req.query;
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ error: 'month must be in YYYY-MM format' });
+  }
+
+  const { data: windows, error: windowsError } = await supabase
+    .from('Psychologist_Availability')
+    .select('day_of_week, start_time, end_time')
+    .eq('psychologist_id', req.params.id);
+
+  if (windowsError) return res.status(500).json({ error: windowsError.message });
+
+  const [year, monthNum] = month.split('-').map(Number);
+  const daysInMonth = new Date(Date.UTC(year, monthNum, 0)).getUTCDate();
+  const lastDay = String(daysInMonth).padStart(2, '0');
+
+  const { data: bookings, error: bookingsError } = await supabase
+    .from('Booking')
+    .select('schedule')
+    .eq('psychologist_id', req.params.id)
+    .not('status', 'in', '(cancelled,declined)')
+    .gte('schedule', phLocalInstant(`${month}-01`, 0).toISOString())
+    .lte('schedule', phLocalInstant(`${month}-${lastDay}`, 23).toISOString());
+
+  if (bookingsError) return res.status(500).json({ error: bookingsError.message });
+
+  const takenInstants = new Set(bookings.map((b) => new Date(b.schedule).getTime()));
+
+  const windowsByDay = {};
+  for (const w of windows) {
+    (windowsByDay[w.day_of_week] ||= []).push(w);
+  }
+
+  const now = new Date();
+  const result = {};
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${month}-${String(day).padStart(2, '0')}`;
+    const dow = phLocalInstant(dateStr, 12).getUTCDay(); // midday sidesteps any offset edge case
+    const dayWindows = windowsByDay[dow] || [];
+
+    const slotSet = new Set();
+    for (const w of dayWindows) {
+      const startH = Number(w.start_time.split(':')[0]);
+      const endH = Number(w.end_time.split(':')[0]);
+      for (let h = startH; h < endH; h++) {
+        const instant = phLocalInstant(dateStr, h);
+        if (instant > now && !takenInstants.has(instant.getTime())) {
+          slotSet.add(`${String(h).padStart(2, '0')}:00`);
+        }
+      }
+    }
+
+    const slots = [...slotSet].sort();
+    result[dateStr] = { available: slots.length > 0, slots };
+  }
+
+  res.json(result);
+});
+
 // GET /admin/psychologists?status=pending|verified|all (default: pending)
 app.get('/admin/psychologists', requireAuth, requireRole('admin'), async (req, res) => {
   const status = req.query.status || 'pending';

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { API_URL, authHeader, getStoredUser } from '../config';
 import PsychologistSidebar from './PsychologistSidebar';
+import ReminderBanner from './ReminderBanner';
 
 // Owns the auth/role guard once, here, instead of every psychologist page repeating
 // the same "am I actually logged in as a psychologist" check.
@@ -33,6 +34,7 @@ function PsychologistLayout({ children }) {
 
   return (
     <div className="flex min-h-screen bg-brand-bg">
+      <ReminderBanner />
       <PsychologistSidebar user={user} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 
       {sidebarOpen && (

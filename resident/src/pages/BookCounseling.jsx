@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import PsychologistCard from '../components/PsychologistCard';
+import BookingCalendar from '../components/BookingCalendar';
 import { API_URL } from '../config';
 
 function BookCounseling() {
@@ -89,7 +90,7 @@ function BookCounseling() {
             onClick={closeModal}
           >
             <div
-              className="bg-brand-surface rounded-2xl shadow-sm p-6 max-w-sm w-full"
+              className="bg-brand-surface rounded-2xl shadow-sm p-6 max-w-xl w-full max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-1">
@@ -104,24 +105,18 @@ function BookCounseling() {
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium block mb-1">Date & time</label>
-                  <input
-                    type="datetime-local"
-                    value={schedule}
-                    onChange={(e) => setSchedule(e.target.value)}
-                    required
-                    className="w-full border border-brand-ink/15 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-primary"
-                  />
+                  <label className="text-sm font-medium block mb-2">Pick a date & time</label>
+                  <BookingCalendar psychologistId={selected.psychologist_id} onSelect={setSchedule} />
                 </div>
 
                 {status && <p className="text-sm text-brand-primary font-medium">{status}</p>}
 
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || !schedule}
                   className="w-full bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors disabled:opacity-60"
                 >
-                  {loading ? 'Booking...' : 'Confirm booking'}
+                  {loading ? 'Booking...' : schedule ? 'Confirm booking' : 'Select a time above'}
                 </button>
               </form>
             </div>

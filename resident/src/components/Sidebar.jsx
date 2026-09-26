@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { API_URL, authHeader } from '../config';
 
 const modules = [
   { label: 'Dashboard', path: '/dashboard', icon: '🏠', enabled: true },
@@ -19,6 +21,17 @@ function Sidebar({ sidebarOpen, setSidebarOpen }) {
   const location = useLocation();
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+    fetch(`${API_URL}/notifications`, { headers: authHeader() })
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) setUnreadCount(data.filter((n) => !n.read).length);
+      })
+      .catch(() => {});
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('openup_token');
@@ -75,7 +88,16 @@ function Sidebar({ sidebarOpen, setSidebarOpen }) {
               }`}
             >
               <span className="text-lg">{m.icon}</span>
-              <span>{m.label}</span>
+              <span className="flex-1">{m.label}</span>
+              {m.path === '/notifications' && unreadCount > 0 && (
+                <span
+                  className={`text-[11px] font-semibold min-w-4.5 h-4.5 px-1 rounded-full flex items-center justify-center ${
+                    isActive ? 'bg-white text-brand-primary' : 'bg-red-500 text-white'
+                  }`}
+                >
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
             </Link>
           );
         })}

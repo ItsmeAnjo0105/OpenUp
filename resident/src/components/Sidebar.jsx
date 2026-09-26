@@ -12,7 +12,7 @@ const modules = [
   { label: 'Community', path: '/community', icon: '🌱', enabled: false },
   { label: 'Resources', path: '/resources', icon: '📚', enabled: false },
   { label: 'Notifications', path: '/notifications', icon: '🔔', enabled: false },
-  { label: 'Profile', path: '/profile', icon: '👤', enabled: false },
+  { label: 'Profile', path: '/profile', icon: '👤', enabled: true },
 ];
 
 function Sidebar({ sidebarOpen, setSidebarOpen }) {

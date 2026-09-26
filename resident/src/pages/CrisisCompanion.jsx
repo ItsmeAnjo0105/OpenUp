@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
-import { API_URL } from '../config';
+import { API_URL, authHeader } from '../config';
 
 function CrisisCompanion() {
   const [messages, setMessages] = useState([
@@ -12,6 +12,9 @@ function CrisisCompanion() {
   const [crisisDetected, setCrisisDetected] = useState(false);
   const [matching, setMatching] = useState(false);
   const [crisisStatus, setCrisisStatus] = useState(null);
+  const [contacts, setContacts] = useState([]);
+  const [alertedIds, setAlertedIds] = useState([]);
+  const [alertError, setAlertError] = useState('');
   const bottomRef = useRef(null);
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
@@ -19,6 +22,32 @@ function CrisisCompanion() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    if (!crisisDetected || !user) return;
+    fetch(`${API_URL}/trusted-contacts`, { headers: authHeader() })
+      .then((res) => res.json())
+      .then((data) => { if (Array.isArray(data)) setContacts(data); })
+      .catch(() => {});
+  }, [crisisDetected]);
+
+  const handleAlertContact = async (contactId) => {
+    setAlertError('');
+    try {
+      const res = await fetch(`${API_URL}/trusted-contacts/${contactId}/alert`, {
+        method: 'POST',
+        headers: authHeader(),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAlertError(data.error || 'Could not log this alert.');
+        return;
+      }
+      setAlertedIds((prev) => [...prev, contactId]);
+    } catch {
+      setAlertError('Could not reach the server.');
+    }
+  };
 
   const handleSend = async (e) => {
     e.preventDefault();
@@ -97,6 +126,37 @@ function CrisisCompanion() {
               >
                 {matching ? 'Connecting...' : 'Connect with a Licensed Psychologist'}
               </button>
+            )}
+
+            {alertError && <p className="text-xs text-red-600 mt-3">{alertError}</p>}
+
+            {contacts.length > 0 ? (
+              <div className="mt-4 pt-4 border-t border-purple-200">
+                <p className="text-xs text-purple-900/70 mb-2">
+                  Or let someone you trust know you're struggling right now:
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {contacts.map((c) => (
+                    <button
+                      key={c.contact_id}
+                      onClick={() => handleAlertContact(c.contact_id)}
+                      disabled={alertedIds.includes(c.contact_id)}
+                      className="text-xs font-medium px-3 py-1.5 rounded-full border border-purple-300 text-purple-900 disabled:opacity-50"
+                    >
+                      {alertedIds.includes(c.contact_id) ? `Logged for ${c.name}` : `Alert ${c.name}`}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-purple-900/50 mt-2">
+                  This records that you asked to reach out to them — please still contact them
+                  yourself if you can, since automatic delivery isn't set up yet.
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-purple-900/60 mt-4 pt-4 border-t border-purple-200">
+                Add a trusted contact in your <a href="/profile" className="underline">Profile</a> to
+                be able to reach out to them from here.
+              </p>
             )}
           </div>
         )}

@@ -3,12 +3,14 @@ import { io } from 'socket.io-client';
 import { API_URL, authHeader } from '../config';
 
 // Shared by both the resident and psychologist dashboards. sender_role is the only
-// identity the server ever returns for a message ('resident' or 'psychologist') --
-// this component never has a real name to display even if it wanted to.
+// identity the server ever returns for a message by default ('resident' or
+// 'psychologist') -- a resident can opt in per-message to also reveal sender_name,
+// resolved server-side, never trusted from the client.
 function ChatPanel({ bookingId, myRole }) {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
+  const [anonymous, setAnonymous] = useState(true);
   const socketRef = useRef(null);
   const bottomRef = useRef(null);
 
@@ -44,7 +46,7 @@ function ChatPanel({ bookingId, myRole }) {
       const res = await fetch(`${API_URL}/bookings/${bookingId}/messages`, {
         method: 'POST',
         headers: { ...authHeader(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: draft.trim() }),
+        body: JSON.stringify({ body: draft.trim(), anonymous }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -72,12 +74,18 @@ function ChatPanel({ bookingId, myRole }) {
           >
             <p>{m.body}</p>
             <p className={`text-[10px] mt-0.5 ${m.sender_role === myRole ? 'text-white/70' : 'text-brand-ink/40'}`}>
-              {m.sender_role === 'resident' ? 'Resident' : 'Counselor'}
+              {m.sender_role === 'resident' ? (m.sender_name || 'Resident') : 'Counselor'}
             </p>
           </div>
         ))}
         <div ref={bottomRef} />
       </div>
+      {myRole === 'resident' && (
+        <label className="flex items-center gap-2 px-3 py-1.5 border-t border-brand-ink/10 text-xs text-brand-ink/60">
+          <input type="checkbox" checked={anonymous} onChange={(e) => setAnonymous(e.target.checked)} />
+          Stay anonymous {!anonymous && '(your name will show on your next message)'}
+        </label>
+      )}
       <form onSubmit={send} className="flex border-t border-brand-ink/10">
         <input
           value={draft}

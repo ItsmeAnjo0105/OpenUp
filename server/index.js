@@ -686,6 +686,53 @@ app.post('/bookings/:id/decline', requireAuth, requireRole('psychologist'), asyn
   res.json(data);
 });
 
+// POST /bookings/:id/cancel — resident cancelling their own booking. Reuses the same
+// admin_cancel_booking transaction (releases the credit, refunds/cancels the
+// Payment) — the function itself has no role logic, ownership is checked here.
+app.post('/bookings/:id/cancel', requireAuth, requireRole('resident'), async (req, res) => {
+  const { data: booking, error: findError } = await supabase
+    .from('Booking')
+    .select('resident_id')
+    .eq('booking_id', req.params.id)
+    .single();
+
+  if (findError || !booking) return res.status(404).json({ error: 'Booking not found' });
+  if (booking.resident_id !== req.user.user_id) return res.status(403).json({ error: 'This is not your booking' });
+
+  const { data, error } = await supabase.rpc('admin_cancel_booking', { p_booking_id: req.params.id });
+
+  if (error) {
+    if (error.message === 'BOOKING_NOT_FOUND') return res.status(404).json({ error: 'Booking not found' });
+    if (error.message === 'ALREADY_TERMINAL') return res.status(409).json({ error: 'This booking is already cancelled or declined' });
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json(data);
+});
+
+// PATCH /bookings/:id/reschedule — body: { schedule }. A confirmed booking resets to
+// 'pending' so the psychologist re-accepts the new time — see db/reschedule_booking.sql.
+app.patch('/bookings/:id/reschedule', requireAuth, requireRole('resident'), async (req, res) => {
+  const { schedule } = req.body;
+  if (!schedule) return res.status(400).json({ error: 'schedule is required' });
+
+  const { data, error } = await supabase.rpc('reschedule_booking', {
+    p_booking_id: req.params.id,
+    p_resident_id: req.user.user_id,
+    p_new_schedule: schedule,
+  });
+
+  if (error) {
+    if (error.message === 'BOOKING_NOT_FOUND') return res.status(404).json({ error: 'Booking not found' });
+    if (error.message === 'NOT_YOUR_BOOKING') return res.status(403).json({ error: 'This is not your booking' });
+    if (error.message === 'ALREADY_TERMINAL') return res.status(409).json({ error: 'This booking is already cancelled or declined' });
+    if (error.code === '23505') return res.status(409).json({ error: 'That psychologist already has a booking at that time' });
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json(data);
+});
+
 // GET /bookings/:id/messages and POST /bookings/:id/messages — Anonymous Chat.
 // Only the resident and psychologist on this specific booking can read or post;
 // responses never include a user id or name, only sender_role, so identity masking
@@ -696,32 +743,63 @@ app.get('/bookings/:id/messages', requireAuth, async (req, res) => {
 
   const { data, error } = await supabase
     .from('Message')
-    .select('message_id, sender_role, body, created_at')
+    .select('message_id, sender_role, body, is_anonymous, created_at')
     .eq('booking_id', req.params.id)
     .order('created_at', { ascending: true });
 
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+
+  // Only resolve the resident's real name for messages they chose to send
+  // non-anonymously -- one lookup for the whole thread, not per message.
+  const needsName = data.some((m) => m.sender_role === 'resident' && !m.is_anonymous);
+  let residentName = null;
+  if (needsName) {
+    const { data: booking } = await supabase
+      .from('Booking')
+      .select('User(name)')
+      .eq('booking_id', req.params.id)
+      .single();
+    residentName = booking?.User?.name || null;
+  }
+
+  res.json(data.map((m) => ({
+    ...m,
+    sender_name: m.sender_role === 'resident' && !m.is_anonymous ? residentName : null,
+  })));
 });
 
+// POST /bookings/:id/messages — body: { body, anonymous }. `anonymous` only applies
+// to a resident's own messages (defaults true, unchanged existing behavior);
+// psychologist messages are never masked regardless.
 app.post('/bookings/:id/messages', requireAuth, async (req, res) => {
-  const { body } = req.body;
+  const { body, anonymous } = req.body;
   if (!body || !body.trim()) return res.status(400).json({ error: 'body is required' });
 
   const role = await getBookingParticipantRole(req.params.id, req.user);
   if (!role) return res.status(403).json({ error: 'You are not part of this conversation' });
 
+  const isAnonymous = role === 'resident' ? anonymous !== false : true;
+
   const { data, error } = await supabase
     .from('Message')
-    .insert([{ booking_id: req.params.id, sender_role: role, body: body.trim() }])
-    .select('message_id, sender_role, body, created_at');
+    .insert([{ booking_id: req.params.id, sender_role: role, body: body.trim(), is_anonymous: isAnonymous }])
+    .select('message_id, sender_role, body, is_anonymous, created_at');
 
   if (error) return res.status(500).json({ error: error.message });
 
   const message = data[0];
-  io.to(`booking-${req.params.id}`).emit('new-message', { booking_id: Number(req.params.id), ...message });
 
-  res.status(201).json(message);
+  // Resolved server-side (never trusting a client-supplied name) so a tampered
+  // request can't leak an identity the sender didn't actually choose to reveal.
+  let sender_name = null;
+  if (role === 'resident' && !isAnonymous) {
+    const { data: booking } = await supabase.from('Booking').select('User(name)').eq('booking_id', req.params.id).single();
+    sender_name = booking?.User?.name || null;
+  }
+
+  io.to(`booking-${req.params.id}`).emit('new-message', { booking_id: Number(req.params.id), ...message, sender_name });
+
+  res.status(201).json({ ...message, sender_name });
 });
 
 // GET /care-credits/reconciliation?barangay_id=3 (barangay_id optional — omit for every barangay)
@@ -1183,6 +1261,137 @@ app.post('/auth/login', async (req, res) => {
   });
 });
 
+// GET /users/me — the logged-in user's own account fields (never the password hash).
+app.get('/users/me', requireAuth, async (req, res) => {
+  const { data, error } = await supabase
+    .from('User')
+    .select('user_id, name, email, role, barangay_id, status')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'Account not found' });
+  res.json(data);
+});
+
+// PATCH /users/me — self-service account update. Changing the password requires
+// current_password to match first; email changes are checked for uniqueness against
+// every OTHER account (not this one, or a same-email "change" would false-positive).
+app.patch('/users/me', requireAuth, async (req, res) => {
+  const { name, email, current_password, new_password } = req.body;
+
+  if (!name && !email && !new_password) {
+    return res.status(400).json({ error: 'Nothing to update' });
+  }
+
+  const { data: user, error: findError } = await supabase
+    .from('User')
+    .select('user_id, password')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  if (findError || !user) return res.status(404).json({ error: 'Account not found' });
+
+  const updates = {};
+  if (name) updates.name = name;
+
+  if (email) {
+    const { data: existing } = await supabase
+      .from('User')
+      .select('user_id')
+      .eq('email', email)
+      .neq('user_id', req.user.user_id)
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      return res.status(409).json({ error: 'An account with this email already exists' });
+    }
+    updates.email = email;
+  }
+
+  if (new_password) {
+    if (!current_password) {
+      return res.status(400).json({ error: 'current_password is required to set a new password' });
+    }
+    const matches = await bcrypt.compare(current_password, user.password);
+    if (!matches) return res.status(401).json({ error: 'Current password is incorrect' });
+    updates.password = await bcrypt.hash(new_password, 10);
+  }
+
+  const { data, error } = await supabase
+    .from('User')
+    .update(updates)
+    .eq('user_id', req.user.user_id)
+    .select('user_id, name, email, role, barangay_id, status');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data[0]);
+});
+
+// GET/POST /trusted-contacts, DELETE /trusted-contacts/:id — a resident's own
+// trusted-contact list for the AI Crisis Companion's "alert trusted person" action.
+app.get('/trusted-contacts', requireAuth, async (req, res) => {
+  const { data, error } = await supabase
+    .from('Trusted_Contact')
+    .select('*')
+    .eq('user_id', req.user.user_id)
+    .order('created_at', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/trusted-contacts', requireAuth, async (req, res) => {
+  const { name, relationship, phone, email } = req.body;
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  if (!phone && !email) return res.status(400).json({ error: 'phone or email is required' });
+
+  const { data, error } = await supabase
+    .from('Trusted_Contact')
+    .insert([{ user_id: req.user.user_id, name, relationship: relationship || null, phone: phone || null, email: email || null }])
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data[0]);
+});
+
+app.delete('/trusted-contacts/:id', requireAuth, async (req, res) => {
+  const { data: contact, error: findError } = await supabase
+    .from('Trusted_Contact')
+    .select('user_id')
+    .eq('contact_id', req.params.id)
+    .single();
+
+  if (findError || !contact) return res.status(404).json({ error: 'Contact not found' });
+  if (contact.user_id !== req.user.user_id) return res.status(403).json({ error: 'This is not your contact' });
+
+  const { error } = await supabase.from('Trusted_Contact').delete().eq('contact_id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ deleted: true });
+});
+
+// POST /trusted-contacts/:id/alert — logs a crisis alert for this contact.
+// delivered stays false: no SMS/email provider is wired in yet, so this
+// deliberately does NOT tell the resident their contact was actually notified —
+// only that the request was recorded.
+app.post('/trusted-contacts/:id/alert', requireAuth, async (req, res) => {
+  const { data: contact, error: findError } = await supabase
+    .from('Trusted_Contact')
+    .select('user_id, name')
+    .eq('contact_id', req.params.id)
+    .single();
+
+  if (findError || !contact) return res.status(404).json({ error: 'Contact not found' });
+  if (contact.user_id !== req.user.user_id) return res.status(403).json({ error: 'This is not your contact' });
+
+  const { data, error } = await supabase
+    .from('Crisis_Alert')
+    .insert([{ user_id: req.user.user_id, contact_id: req.params.id, delivered: false }])
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json({ ...data[0], contact_name: contact.name });
+});
+
 // GET /auth/me — round-trips the stored token: confirms it's still valid and returns
 // who it belongs to. The frontend calls this on app load to detect an expired/invalid
 // stored token instead of silently trusting whatever's in localStorage forever.
@@ -1342,11 +1551,25 @@ app.post('/voice-journal', upload.single('audio'), async (req, res) => {
       return res.status(500).json({ error: error.message });
     }
 
+    // Step 6: a flagged crisis entry actually escalates now instead of just sitting in
+    // the DB as a flag nobody acts on — same match-or-queue path the AI Crisis
+    // Companion uses. Best-effort: the journal entry is already saved either way, so a
+    // failure here shouldn't fail the whole request.
+    let crisisEscalation = null;
+    if (isCrisis) {
+      try {
+        crisisEscalation = await escalateCrisis(user_id);
+      } catch (escalationErr) {
+        crisisEscalation = { error: escalationErr.message };
+      }
+    }
+
     res.status(201).json({
       ...data[0],
       emotional_summary: reflectionBase,
       wellness_suggestion: wellnessSuggestion,
       content_indicators: contentIndicators,
+      crisis_escalation: crisisEscalation,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1365,11 +1588,11 @@ app.get('/voice-journal/user/:userId', async (req, res) => {
   res.json(data);
 });
 
-app.post('/crisis-match', async (req, res) => {
-  const { user_id } = req.body;
-  if (!user_id) return res.status(400).json({ error: 'user_id is required' });
-
-  // Find an available, verified psychologist
+// Shared by /crisis-match (AI Crisis Companion) and the Voice Journal's crisis-flag
+// path: finds an available verified psychologist and instantly books an audio session
+// (auto-confirmed, no waiting on accept), or queues the resident in Crisis_Requests if
+// nobody's free right now. Returns the same shape both callers need.
+async function escalateCrisis(userId) {
   const { data: available, error: findError } = await supabase
     .from('Psychologist')
     .select('psychologist_id, session_price')
@@ -1377,40 +1600,44 @@ app.post('/crisis-match', async (req, res) => {
     .eq('is_available', true)
     .limit(1);
 
-  if (findError) return res.status(500).json({ error: findError.message });
+  if (findError) throw findError;
 
   if (!available || available.length === 0) {
-    // No one free — add to the priority queue instead
     const { data: queued, error: queueError } = await supabase
       .from('Crisis_Requests')
-      .insert([{ user_id, status: 'queued' }])
+      .insert([{ user_id: userId, status: 'queued' }])
       .select();
 
-    if (queueError) return res.status(500).json({ error: queueError.message });
-
-    return res.json({ matched: false, queued: queued[0] });
+    if (queueError) throw queueError;
+    return { matched: false, queued: queued[0] };
   }
 
   const psychologistId = available[0].psychologist_id;
 
-  // Same atomic credit-claim + booking + payment transaction as /bookings — see
-  // db/create_booking_transaction.sql — so a crisis match can't leave an orphaned
-  // booking or a stranded credit either. p_auto_confirm: true skips the pending/accept
-  // step regular bookings now go through — an active crisis shouldn't wait on approval.
   const { data, error } = await supabase.rpc('create_booking_transaction', {
-    p_resident_id: user_id,
+    p_resident_id: userId,
     p_psychologist_id: psychologistId,
     p_schedule: new Date().toISOString(),
     p_session_type: 'crisis',
     p_auto_confirm: true,
   });
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) throw error;
 
-  // Mark the psychologist as no longer immediately available
   await supabase.from('Psychologist').update({ is_available: false }).eq('psychologist_id', psychologistId);
 
-  res.json({ matched: true, booking: data.booking });
+  return { matched: true, booking: data.booking };
+}
+
+app.post('/crisis-match', async (req, res) => {
+  const { user_id } = req.body;
+  if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+  try {
+    res.json(await escalateCrisis(user_id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 const COMPANION_SYSTEM_PROMPT = `You are a warm, supportive, non-clinical companion inside a mental wellness app called OpenUp for Cebu City residents. Respond in 2-4 sentences. Offer a simple grounding or breathing exercise if it fits naturally. Never diagnose, never use clinical labels, never claim to be a licensed professional. Match the language the person used (Bisaya, Filipino, or English) as best you can. Gently encourage reaching out to a licensed psychologist for anything serious, without being pushy or repetitive. Never invent or state specific phone numbers, hotline numbers, or emergency contact details under any circumstance — you do not actually know them; the app shows verified local crisis resources separately. If someone expresses thoughts of self-harm or suicide, respond with calm, direct empathy and gently point them toward the app's in-app option to connect with a licensed psychologist, without listing any phone numbers yourself.`;

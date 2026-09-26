@@ -26,22 +26,71 @@ function Dashboard() {
       .catch(() => {});
   };
 
+  const loadBookings = () => {
+    fetch(`${API_URL}/bookings/user/${user.user_id}`)
+      .then((res) => res.json())
+      .then((data) => setBookings(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  };
+
   useEffect(() => {
     if (!user) {
       navigate('/login');
       return;
     }
 
-    fetch(`${API_URL}/bookings/user/${user.user_id}`)
-      .then((res) => res.json())
-      .then((data) => setBookings(Array.isArray(data) ? data : []))
-      .catch(() => {});
-
+    loadBookings();
     loadMoodEntries();
   }, [user, navigate]);
 
   const [payingId, setPayingId] = useState(null);
   const [payError, setPayError] = useState('');
+  const [bookingActionError, setBookingActionError] = useState('');
+  const [reschedulingId, setReschedulingId] = useState(null);
+  const [rescheduleValue, setRescheduleValue] = useState('');
+
+  const handleCancelBooking = async (bookingId) => {
+    setBookingActionError('');
+    try {
+      const res = await fetch(`${API_URL}/bookings/${bookingId}/cancel`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('openup_token')}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setBookingActionError(data.error || 'Could not cancel this booking.');
+        return;
+      }
+      loadBookings();
+    } catch {
+      setBookingActionError('Could not reach the server.');
+    }
+  };
+
+  const handleReschedule = async (bookingId) => {
+    if (!rescheduleValue) return;
+    setBookingActionError('');
+    try {
+      const res = await fetch(`${API_URL}/bookings/${bookingId}/reschedule`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('openup_token')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ schedule: rescheduleValue }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setBookingActionError(data.error || 'Could not reschedule this booking.');
+        return;
+      }
+      setReschedulingId(null);
+      setRescheduleValue('');
+      loadBookings();
+    } catch {
+      setBookingActionError('Could not reach the server.');
+    }
+  };
 
   const handlePay = async (paymentId) => {
     setPayError('');
@@ -201,39 +250,84 @@ function Dashboard() {
           <div className="bg-brand-surface rounded-2xl shadow-sm p-6">
             <p className="font-medium mb-4">Your bookings</p>
             {payError && <p className="text-sm text-red-600 mb-3">{payError}</p>}
+            {bookingActionError && <p className="text-sm text-red-600 mb-3">{bookingActionError}</p>}
             <div className="space-y-3">
               {bookings.map((b) => {
                 const payment = b.Payment?.[0];
+                const canManage = b.status === 'pending' || b.status === 'confirmed';
                 return (
-                  <div
-                    key={b.booking_id}
-                    className="border border-brand-ink/10 rounded-xl p-4 flex items-center justify-between"
-                  >
-                    <div>
-                      <p className="text-sm font-semibold">
-                        {b.Psychologist?.User?.name || `Psychologist #${b.psychologist_id}`}
-                      </p>
-                      <p className="text-xs text-brand-ink/60 mt-1">
-                        {new Date(b.schedule).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}
-                        {' · '}
-                        <span className="capitalize">{b.status}</span>
-                      </p>
+                  <div key={b.booking_id} className="border border-brand-ink/10 rounded-xl p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold">
+                          {b.Psychologist?.User?.name || `Psychologist #${b.psychologist_id}`}
+                        </p>
+                        <p className="text-xs text-brand-ink/60 mt-1">
+                          {new Date(b.schedule).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}
+                          {' · '}
+                          <span className="capitalize">{b.status}</span>
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {payment && payment.status === 'pending' && (
+                          <button
+                            onClick={() => handlePay(payment.payment_id)}
+                            disabled={payingId === payment.payment_id}
+                            className="text-xs font-medium px-3 py-1.5 rounded-full bg-brand-primary text-white disabled:opacity-60"
+                          >
+                            {payingId === payment.payment_id
+                              ? 'Redirecting...'
+                              : `Pay ₱${Number(payment.amount).toLocaleString()}`}
+                          </button>
+                        )}
+                        {payment && payment.status === 'paid' && (
+                          <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-green-100 text-green-700">
+                            Paid
+                          </span>
+                        )}
+                        {canManage && (
+                          <>
+                            <button
+                              onClick={() => {
+                                setReschedulingId(reschedulingId === b.booking_id ? null : b.booking_id);
+                                setRescheduleValue('');
+                              }}
+                              className="text-xs font-medium px-3 py-1.5 rounded-full border border-brand-ink/20"
+                            >
+                              Reschedule
+                            </button>
+                            <button
+                              onClick={() => handleCancelBooking(b.booking_id)}
+                              className="text-xs font-medium px-3 py-1.5 rounded-full border border-red-300 text-red-600"
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                    {payment && payment.status === 'pending' && (
-                      <button
-                        onClick={() => handlePay(payment.payment_id)}
-                        disabled={payingId === payment.payment_id}
-                        className="text-xs font-medium px-3 py-1.5 rounded-full bg-brand-primary text-white disabled:opacity-60"
-                      >
-                        {payingId === payment.payment_id
-                          ? 'Redirecting...'
-                          : `Pay ₱${Number(payment.amount).toLocaleString()}`}
-                      </button>
+
+                    {reschedulingId === b.booking_id && (
+                      <div className="mt-3 flex items-center gap-2">
+                        <input
+                          type="datetime-local"
+                          value={rescheduleValue}
+                          onChange={(e) => setRescheduleValue(e.target.value)}
+                          className="border border-brand-ink/15 rounded-lg px-3 py-1.5 text-sm"
+                        />
+                        <button
+                          onClick={() => handleReschedule(b.booking_id)}
+                          disabled={!rescheduleValue}
+                          className="text-xs font-medium px-3 py-1.5 rounded-full bg-brand-primary text-white disabled:opacity-60"
+                        >
+                          Confirm new time
+                        </button>
+                      </div>
                     )}
-                    {payment && payment.status === 'paid' && (
-                      <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-green-100 text-green-700">
-                        Paid
-                      </span>
+                    {reschedulingId === b.booking_id && b.status === 'confirmed' && (
+                      <p className="text-xs text-brand-ink/50 mt-2">
+                        Rescheduling a confirmed session sends it back to your psychologist for re-acceptance.
+                      </p>
                     )}
                   </div>
                 );

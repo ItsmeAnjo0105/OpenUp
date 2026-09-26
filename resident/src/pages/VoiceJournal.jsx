@@ -399,7 +399,20 @@ function VoiceJournal() {
                   professional support.
                 </p>
 
-                {crisisStatus === 'queued' ? (
+                {result.crisis_escalation?.matched ? (
+                  <button
+                    onClick={() => navigate(`/session/${result.crisis_escalation.booking.booking_id}`)}
+                    className="block w-full text-center bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors mb-2"
+                  >
+                    Join now — a psychologist is ready
+                  </button>
+                ) : result.crisis_escalation && !result.crisis_escalation.error ? (
+                  <p className="text-sm text-purple-900 mb-2">
+                    No one is free to talk this exact moment, but you've been placed at the top of the
+                    queue and a psychologist will reach out shortly. If you need to talk to someone right
+                    now, please call [YOUR VERIFIED CRISIS HOTLINE NUMBER HERE].
+                  </p>
+                ) : crisisStatus === 'queued' ? (
                   <p className="text-sm text-purple-900 mb-2">
                     No one is free to talk this exact moment, but you've been placed at the top of the
                     queue and a psychologist will reach out shortly. If you need to talk to someone right

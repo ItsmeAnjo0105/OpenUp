@@ -24,6 +24,9 @@ import AdminDashboard from './pages/AdminDashboard';
 import AnonymousChat from './pages/AnonymousChat';
 import PaymentResult from './pages/PaymentResult';
 import Profile from './pages/Profile';
+import Resources from './pages/Resources';
+import Community from './pages/Community';
+import Notifications from './pages/Notifications';
 
 function App() {
   return (
@@ -53,6 +56,9 @@ function App() {
       <Route path="/anonymous-chat" element={<AnonymousChat />} />
       <Route path="/payment/result" element={<PaymentResult />} />
       <Route path="/profile" element={<Profile />} />
+      <Route path="/resources" element={<Resources />} />
+      <Route path="/community" element={<Community />} />
+      <Route path="/notifications" element={<Notifications />} />
     </Routes>
   );
 }

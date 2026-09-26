@@ -13,6 +13,8 @@ function AdminDashboard() {
   const [finance, setFinance] = useState([]);
   const [financeError, setFinanceError] = useState('');
   const [financeInputs, setFinanceInputs] = useState({});
+  const [announcement, setAnnouncement] = useState({ title: '', body: '' });
+  const [announcementStatus, setAnnouncementStatus] = useState('');
   const navigate = useNavigate();
   const user = getStoredUser();
 
@@ -212,6 +214,27 @@ function AdminDashboard() {
     }
   };
 
+  const postAnnouncement = async (e) => {
+    e.preventDefault();
+    setAnnouncementStatus('');
+    try {
+      const res = await fetch(`${API_URL}/admin/announcements`, {
+        method: 'POST',
+        headers: { ...authHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(announcement),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAnnouncementStatus(data.error || 'Could not post announcement.');
+        return;
+      }
+      setAnnouncement({ title: '', body: '' });
+      setAnnouncementStatus('Sent to every user.');
+    } catch {
+      setAnnouncementStatus('Could not reach the server.');
+    }
+  };
+
   if (checking) return null;
 
   return (
@@ -394,6 +417,32 @@ function AdminDashboard() {
               ))}
             </div>
           )}
+        </div>
+
+        <div className="bg-brand-surface rounded-2xl shadow-sm p-6 mt-6">
+          <h2 className="font-display text-lg font-semibold mb-1">System announcement</h2>
+          <p className="text-xs text-brand-ink/50 mb-4">Sends a notification to every user on the platform.</p>
+
+          {announcementStatus && <p className="text-sm text-brand-primary mb-3">{announcementStatus}</p>}
+
+          <form onSubmit={postAnnouncement} className="space-y-3">
+            <input
+              placeholder="Title" value={announcement.title}
+              onChange={(e) => setAnnouncement({ ...announcement, title: e.target.value })}
+              required
+              className="w-full border border-brand-ink/15 rounded-lg px-3 py-2 text-sm"
+            />
+            <textarea
+              placeholder="Message" value={announcement.body}
+              onChange={(e) => setAnnouncement({ ...announcement, body: e.target.value })}
+              required
+              rows={2}
+              className="w-full border border-brand-ink/15 rounded-lg px-3 py-2 text-sm resize-none"
+            />
+            <button type="submit" className="text-sm font-medium px-4 py-2 rounded-full bg-brand-primary text-white">
+              Send to everyone
+            </button>
+          </form>
         </div>
       </div>
     </div>

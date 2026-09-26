@@ -270,6 +270,227 @@ app.get('/psychologists', async (req, res) => {
   res.json(withPhotoUrls);
 });
 
+// GET /resources?search=... — public read (residents view/search); file_url resolves
+// the storage path the same way psychologist photos do.
+app.get('/resources', async (req, res) => {
+  let query = supabase.from('Resource').select('*').order('created_at', { ascending: false });
+
+  const { search } = req.query;
+  if (search) query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%`);
+
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+
+  res.json(data.map((r) => ({
+    ...r,
+    file_url: supabase.storage.from('resources').getPublicUrl(r.file_path).data.publicUrl,
+  })));
+});
+
+// Community Testimonials: public read, resident-authored, ownership-checked edit/delete.
+app.get('/testimonials', async (req, res) => {
+  const { data, error } = await supabase
+    .from('Testimonial')
+    .select('*, User(name)')
+    .order('created_at', { ascending: false });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/testimonials', requireAuth, requireRole('resident'), async (req, res) => {
+  const { body } = req.body;
+  if (!body || !body.trim()) return res.status(400).json({ error: 'body is required' });
+
+  const { data, error } = await supabase
+    .from('Testimonial')
+    .insert([{ user_id: req.user.user_id, body: body.trim() }])
+    .select('*, User(name)');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data[0]);
+});
+
+app.patch('/testimonials/:id', requireAuth, async (req, res) => {
+  const { body } = req.body;
+  if (!body || !body.trim()) return res.status(400).json({ error: 'body is required' });
+
+  const { data: existing, error: findError } = await supabase
+    .from('Testimonial').select('user_id').eq('testimonial_id', req.params.id).single();
+  if (findError || !existing) return res.status(404).json({ error: 'Testimonial not found' });
+  if (existing.user_id !== req.user.user_id) return res.status(403).json({ error: 'This is not your post' });
+
+  const { data, error } = await supabase
+    .from('Testimonial')
+    .update({ body: body.trim(), updated_at: new Date().toISOString() })
+    .eq('testimonial_id', req.params.id)
+    .select('*, User(name)');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data[0]);
+});
+
+app.delete('/testimonials/:id', requireAuth, async (req, res) => {
+  const { data: existing, error: findError } = await supabase
+    .from('Testimonial').select('user_id').eq('testimonial_id', req.params.id).single();
+  if (findError || !existing) return res.status(404).json({ error: 'Testimonial not found' });
+  if (existing.user_id !== req.user.user_id) return res.status(403).json({ error: 'This is not your post' });
+
+  const { error } = await supabase.from('Testimonial').delete().eq('testimonial_id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ deleted: true });
+});
+
+app.get('/testimonials/:id/comments', async (req, res) => {
+  const { data, error } = await supabase
+    .from('Testimonial_Comment')
+    .select('*, User(name)')
+    .eq('testimonial_id', req.params.id)
+    .order('created_at', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/testimonials/:id/comments', requireAuth, requireRole('resident'), async (req, res) => {
+  const { body } = req.body;
+  if (!body || !body.trim()) return res.status(400).json({ error: 'body is required' });
+
+  const { data, error } = await supabase
+    .from('Testimonial_Comment')
+    .insert([{ testimonial_id: req.params.id, user_id: req.user.user_id, body: body.trim() }])
+    .select('*, User(name)');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data[0]);
+});
+
+app.patch('/testimonials/:id/comments/:commentId', requireAuth, async (req, res) => {
+  const { body } = req.body;
+  if (!body || !body.trim()) return res.status(400).json({ error: 'body is required' });
+
+  const { data: existing, error: findError } = await supabase
+    .from('Testimonial_Comment').select('user_id').eq('comment_id', req.params.commentId).single();
+  if (findError || !existing) return res.status(404).json({ error: 'Comment not found' });
+  if (existing.user_id !== req.user.user_id) return res.status(403).json({ error: 'This is not your comment' });
+
+  const { data, error } = await supabase
+    .from('Testimonial_Comment')
+    .update({ body: body.trim(), updated_at: new Date().toISOString() })
+    .eq('comment_id', req.params.commentId)
+    .select('*, User(name)');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data[0]);
+});
+
+app.delete('/testimonials/:id/comments/:commentId', requireAuth, async (req, res) => {
+  const { data: existing, error: findError } = await supabase
+    .from('Testimonial_Comment').select('user_id').eq('comment_id', req.params.commentId).single();
+  if (findError || !existing) return res.status(404).json({ error: 'Comment not found' });
+  if (existing.user_id !== req.user.user_id) return res.status(403).json({ error: 'This is not your comment' });
+
+  const { error } = await supabase.from('Testimonial_Comment').delete().eq('comment_id', req.params.commentId);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ deleted: true });
+});
+
+// GET /notifications — merges real stored rows (message alerts, system announcements)
+// with session reminders computed live from upcoming confirmed bookings. Reminders are
+// deliberately not stored: there's no background scheduler in this app, so computing
+// them at read time from real Booking rows is the only way they're guaranteed correct.
+app.get('/notifications', requireAuth, async (req, res) => {
+  const { data: stored, error } = await supabase
+    .from('Notification')
+    .select('*')
+    .eq('user_id', req.user.user_id)
+    .order('created_at', { ascending: false })
+    .limit(50);
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  let reminders = [];
+  if (req.user.role === 'resident' || req.user.role === 'psychologist') {
+    const now = new Date();
+    const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+    let bookingQuery = supabase
+      .from('Booking')
+      .select('booking_id, schedule, Psychologist(User(name)), User(name)')
+      .eq('status', 'confirmed')
+      .gte('schedule', now.toISOString())
+      .lte('schedule', in24h.toISOString());
+
+    if (req.user.role === 'resident') {
+      bookingQuery = bookingQuery.eq('resident_id', req.user.user_id);
+    } else {
+      const { data: psychologist } = await supabase
+        .from('Psychologist')
+        .select('psychologist_id')
+        .eq('user_id', req.user.user_id)
+        .single();
+      bookingQuery = psychologist ? bookingQuery.eq('psychologist_id', psychologist.psychologist_id) : null;
+    }
+
+    if (bookingQuery) {
+      const { data: upcoming } = await bookingQuery;
+      reminders = (upcoming || []).map((b) => ({
+        notification_id: `reminder-${b.booking_id}`,
+        type: 'reminder',
+        title: 'Upcoming session',
+        body: `Your session is at ${new Date(b.schedule).toLocaleString()}`,
+        link: req.user.role === 'resident' ? `/session/${b.booking_id}` : `/session/${b.booking_id}`,
+        read: false,
+        created_at: b.schedule,
+      }));
+    }
+  }
+
+  const combined = [...reminders, ...stored].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  res.json(combined);
+});
+
+// POST /notifications/:id/read — only for real stored notifications; a synthetic
+// "reminder-<id>" id from the computed list has nothing to mark, so this only
+// ever receives a real numeric notification_id from the frontend.
+app.post('/notifications/:id/read', requireAuth, async (req, res) => {
+  const { data: existing, error: findError } = await supabase
+    .from('Notification').select('user_id').eq('notification_id', req.params.id).single();
+  if (findError || !existing) return res.status(404).json({ error: 'Notification not found' });
+  if (existing.user_id !== req.user.user_id) return res.status(403).json({ error: 'This is not your notification' });
+
+  const { error } = await supabase.from('Notification').update({ read: true }).eq('notification_id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ read: true });
+});
+
+// POST /admin/announcements — body: { title, body }. Fans out a Notification row
+// (type: 'system') to every user so System Updates has a real way to get content,
+// same judgment call as seeding Wellness Resources: without this the feature would
+// be permanently empty.
+app.post('/admin/announcements', requireAuth, requireRole('admin'), async (req, res) => {
+  const { title, body } = req.body;
+  if (!title || !body) return res.status(400).json({ error: 'title and body are required' });
+
+  const { data: announcement, error: annError } = await supabase
+    .from('System_Announcement')
+    .insert([{ title, body, created_by: req.user.user_id }])
+    .select();
+
+  if (annError) return res.status(500).json({ error: annError.message });
+
+  const { data: users, error: usersError } = await supabase.from('User').select('user_id');
+  if (usersError) return res.status(500).json({ error: usersError.message });
+
+  if (users.length > 0) {
+    const notifRows = users.map((u) => ({ user_id: u.user_id, type: 'system', title, body, link: null, read: false }));
+    const { error: notifError } = await supabase.from('Notification').insert(notifRows);
+    if (notifError) return res.status(500).json({ error: notifError.message });
+  }
+
+  res.status(201).json(announcement[0]);
+});
+
 // GET /psychologists/me — the logged-in psychologist's own profile, regardless of
 // verification status (the public /psychologists list above only shows is_verified=true,
 // which is exactly the status a psychologist waiting on approval needs to see).
@@ -798,6 +1019,44 @@ app.post('/bookings/:id/messages', requireAuth, async (req, res) => {
   }
 
   io.to(`booking-${req.params.id}`).emit('new-message', { booking_id: Number(req.params.id), ...message, sender_name });
+
+  // Message Alert: notify the OTHER participant, never the sender. Body stays
+  // generic (no content, no identity) regardless of the anonymity toggle above --
+  // a notification is a different surface than the chat itself, so it shouldn't
+  // leak more than the chat already chose to reveal.
+  const { data: bookingInfo } = await supabase
+    .from('Booking')
+    .select('resident_id, psychologist_id')
+    .eq('booking_id', req.params.id)
+    .single();
+
+  if (bookingInfo) {
+    let recipientUserId = null;
+    let recipientLink = null;
+    if (role === 'resident') {
+      const { data: psych } = await supabase
+        .from('Psychologist')
+        .select('user_id')
+        .eq('psychologist_id', bookingInfo.psychologist_id)
+        .single();
+      recipientUserId = psych?.user_id;
+      recipientLink = '/psychologist/chats';
+    } else {
+      recipientUserId = bookingInfo.resident_id;
+      recipientLink = '/anonymous-chat';
+    }
+
+    if (recipientUserId) {
+      await supabase.from('Notification').insert([{
+        user_id: recipientUserId,
+        type: 'message',
+        title: 'New message',
+        body: 'You have a new message in your chat.',
+        link: recipientLink,
+        read: false,
+      }]);
+    }
+  }
 
   res.status(201).json({ ...message, sender_name });
 });

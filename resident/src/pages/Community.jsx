@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { API_URL, authHeader } from '../config';
 
 function CommentThread({ testimonialId, currentUserId }) {
@@ -8,6 +9,7 @@ function CommentThread({ testimonialId, currentUserId }) {
   const [editingId, setEditingId] = useState(null);
   const [editDraft, setEditDraft] = useState('');
   const [error, setError] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   const load = () => {
     fetch(`${API_URL}/testimonials/${testimonialId}/comments`)
@@ -72,6 +74,15 @@ function CommentThread({ testimonialId, currentUserId }) {
     }
   };
 
+  const confirmRemove = (commentId) => {
+    setConfirmDialog({
+      title: 'Delete this comment?',
+      message: "This can't be undone.",
+      confirmLabel: 'Delete',
+      onConfirm: () => remove(commentId),
+    });
+  };
+
   return (
     <div className="mt-3 pt-3 border-t border-brand-ink/10 space-y-2">
       {error && <p className="text-xs text-red-600">{error}</p>}
@@ -96,7 +107,7 @@ function CommentThread({ testimonialId, currentUserId }) {
               {c.user_id === currentUserId && (
                 <div className="flex gap-2 shrink-0">
                   <button onClick={() => { setEditingId(c.comment_id); setEditDraft(c.body); }} className="text-xs text-brand-ink/50">Edit</button>
-                  <button onClick={() => remove(c.comment_id)} className="text-xs text-red-600">Delete</button>
+                  <button onClick={() => confirmRemove(c.comment_id)} className="text-xs text-red-600">Delete</button>
                 </div>
               )}
             </div>
@@ -112,6 +123,8 @@ function CommentThread({ testimonialId, currentUserId }) {
         />
         <button type="submit" className="text-xs font-medium text-brand-primary">Post</button>
       </form>
+
+      <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
     </div>
   );
 }
@@ -123,6 +136,7 @@ function Community() {
   const [editDraft, setEditDraft] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [error, setError] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   const load = () => {
@@ -188,6 +202,15 @@ function Community() {
     }
   };
 
+  const confirmRemove = (testimonialId) => {
+    setConfirmDialog({
+      title: 'Delete this post?',
+      message: "This can't be undone, and its comments will be deleted too.",
+      confirmLabel: 'Delete',
+      onConfirm: () => remove(testimonialId),
+    });
+  };
+
   return (
     <Layout>
       <div className="max-w-2xl mx-auto">
@@ -220,7 +243,7 @@ function Community() {
                 {t.user_id === user?.user_id && (
                   <div className="flex gap-2 shrink-0">
                     <button onClick={() => { setEditingId(t.testimonial_id); setEditDraft(t.body); }} className="text-xs text-brand-ink/50">Edit</button>
-                    <button onClick={() => remove(t.testimonial_id)} className="text-xs text-red-600">Delete</button>
+                    <button onClick={() => confirmRemove(t.testimonial_id)} className="text-xs text-red-600">Delete</button>
                   </div>
                 )}
               </div>
@@ -256,6 +279,8 @@ function Community() {
           ))}
         </div>
       </div>
+
+      <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
     </Layout>
   );
 }

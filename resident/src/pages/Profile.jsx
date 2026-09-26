@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { API_URL, authHeader } from '../config';
 
 function Profile() {
@@ -12,6 +13,7 @@ function Profile() {
   const [contacts, setContacts] = useState([]);
   const [contactForm, setContactForm] = useState({ name: '', relationship: '', phone: '', email: '' });
   const [contactError, setContactError] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   const loadAccount = () => {
     fetch(`${API_URL}/users/me`, { headers: authHeader() })
@@ -110,6 +112,15 @@ function Profile() {
     }
   };
 
+  const confirmRemoveContact = (contactId, name) => {
+    setConfirmDialog({
+      title: `Remove ${name}?`,
+      message: "You won't be able to alert them from the AI Crisis Companion anymore.",
+      confirmLabel: 'Remove',
+      onConfirm: () => removeContact(contactId),
+    });
+  };
+
   return (
     <Layout>
       <div className="max-w-2xl mx-auto space-y-6">
@@ -192,7 +203,7 @@ function Profile() {
                     <p className="text-sm font-semibold">{c.name} {c.relationship && <span className="text-brand-ink/50 font-normal">· {c.relationship}</span>}</p>
                     <p className="text-xs text-brand-ink/60">{[c.phone, c.email].filter(Boolean).join(' · ')}</p>
                   </div>
-                  <button onClick={() => removeContact(c.contact_id)} className="text-xs text-red-600 font-medium">
+                  <button onClick={() => confirmRemoveContact(c.contact_id, c.name)} className="text-xs text-red-600 font-medium">
                     Remove
                   </button>
                 </div>
@@ -228,6 +239,8 @@ function Profile() {
           </form>
         </div>
       </div>
+
+      <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
     </Layout>
   );
 }

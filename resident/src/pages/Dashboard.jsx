@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, ResponsiveContainer } from 'recharts';
 import Layout from '../components/Layout';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { API_URL } from '../config';
 
 const moods = [
@@ -48,6 +49,7 @@ function Dashboard() {
   const [bookingActionError, setBookingActionError] = useState('');
   const [reschedulingId, setReschedulingId] = useState(null);
   const [rescheduleValue, setRescheduleValue] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   const handleCancelBooking = async (bookingId) => {
     setBookingActionError('');
@@ -65,6 +67,15 @@ function Dashboard() {
     } catch {
       setBookingActionError('Could not reach the server.');
     }
+  };
+
+  const confirmCancelBooking = (bookingId) => {
+    setConfirmDialog({
+      title: 'Cancel this booking?',
+      message: "This can't be undone. Any Care Credit or payment tied to it will be released.",
+      confirmLabel: 'Cancel booking',
+      onConfirm: () => handleCancelBooking(bookingId),
+    });
   };
 
   const handleReschedule = async (bookingId) => {
@@ -297,7 +308,7 @@ function Dashboard() {
                               Reschedule
                             </button>
                             <button
-                              onClick={() => handleCancelBooking(b.booking_id)}
+                              onClick={() => confirmCancelBooking(b.booking_id)}
                               className="text-xs font-medium px-3 py-1.5 rounded-full border border-red-300 text-red-600"
                             >
                               Cancel
@@ -346,6 +357,8 @@ function Dashboard() {
           </ResponsiveContainer>
         </div>
       </div>
+
+      <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
     </Layout>
   );
 }

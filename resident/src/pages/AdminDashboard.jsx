@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { API_URL, authHeader, getStoredUser } from '../config';
 
 function AdminDashboard() {
@@ -15,6 +16,7 @@ function AdminDashboard() {
   const [financeInputs, setFinanceInputs] = useState({});
   const [announcement, setAnnouncement] = useState({ title: '', body: '' });
   const [announcementStatus, setAnnouncementStatus] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const navigate = useNavigate();
   const user = getStoredUser();
 
@@ -125,6 +127,24 @@ function AdminDashboard() {
     } catch {
       setBookingError('Could not reach the server.');
     }
+  };
+
+  const confirmCancelBooking = (booking) => {
+    setConfirmDialog({
+      title: 'Cancel this booking?',
+      message: `${booking.User?.name || 'This resident'}'s booking will be cancelled and any credit or payment released.`,
+      confirmLabel: 'Cancel booking',
+      onConfirm: () => cancelBooking(booking.booking_id),
+    });
+  };
+
+  const confirmReject = (psychologist) => {
+    setConfirmDialog({
+      title: 'Reject this application?',
+      message: `${psychologist.User?.name || 'This applicant'}'s account will be marked rejected.`,
+      confirmLabel: 'Reject',
+      onConfirm: () => act(psychologist.psychologist_id, 'reject'),
+    });
   };
 
   const reassignBooking = async (bookingId, newPsychologistId) => {
@@ -281,7 +301,7 @@ function AdminDashboard() {
                       Approve
                     </button>
                     <button
-                      onClick={() => act(p.psychologist_id, 'reject')}
+                      onClick={() => confirmReject(p)}
                       className="text-xs font-medium px-3 py-1.5 rounded-full border border-red-300 text-red-600"
                     >
                       Reject
@@ -321,7 +341,7 @@ function AdminDashboard() {
                         Reassign
                       </button>
                       <button
-                        onClick={() => cancelBooking(b.booking_id)}
+                        onClick={() => confirmCancelBooking(b)}
                         className="text-xs font-medium px-3 py-1.5 rounded-full border border-red-300 text-red-600"
                       >
                         Cancel
@@ -445,6 +465,8 @@ function AdminDashboard() {
           </form>
         </div>
       </div>
+
+      <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
     </div>
   );
 }

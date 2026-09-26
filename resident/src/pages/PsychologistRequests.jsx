@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import PsychologistLayout from '../components/PsychologistLayout';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { API_URL, authHeader } from '../config';
 
 function PsychologistRequests() {
   const [requests, setRequests] = useState([]);
   const [error, setError] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   const load = () => {
     fetch(`${API_URL}/psychologists/me/booking-requests`, { headers: authHeader() })
@@ -36,6 +38,15 @@ function PsychologistRequests() {
     }
   };
 
+  const confirmDecline = (booking) => {
+    setConfirmDialog({
+      title: 'Decline this request?',
+      message: `${booking.User?.name || 'This resident'}'s request will be declined and any reserved Care Credit released back to them.`,
+      confirmLabel: 'Decline',
+      onConfirm: () => act(booking.booking_id, 'decline'),
+    });
+  };
+
   return (
     <PsychologistLayout>
       <h1 className="font-display text-2xl font-semibold mb-1">Appointment Requests</h1>
@@ -65,7 +76,7 @@ function PsychologistRequests() {
                     Accept
                   </button>
                   <button
-                    onClick={() => act(r.booking_id, 'decline')}
+                    onClick={() => confirmDecline(r)}
                     className="text-xs font-medium px-3 py-1.5 rounded-full border border-red-300 text-red-600"
                   >
                     Decline
@@ -76,6 +87,8 @@ function PsychologistRequests() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
     </PsychologistLayout>
   );
 }

@@ -26,3 +26,15 @@ export const EMOTIONS = [
 
 export const LEVEL_FALLBACK_LABEL = { 1: 'Low', 2: 'Down', 3: 'Okay', 4: 'Good', 5: 'Calm' };
 export const LEVEL_FALLBACK_EMOJI = { 1: '😞', 2: '😕', 3: '😐', 4: '🙂', 5: '😌' };
+
+const EMOTION_BY_LABEL = new Map(EMOTIONS.map((e) => [e.label, e]));
+
+// A Mood_Entry row's mood_label carries the exact emotion picked; older rows
+// (logged before that column existed) fall back to the plain 1-5 label/emoji.
+export function emojiForEntry(entry) {
+  return EMOTION_BY_LABEL.get(entry?.mood_label)?.emoji || LEVEL_FALLBACK_EMOJI[entry?.mood_level] || '○';
+}
+
+export function labelForEntry(entry) {
+  return entry?.mood_label || LEVEL_FALLBACK_LABEL[entry?.mood_level] || 'Logged';
+}

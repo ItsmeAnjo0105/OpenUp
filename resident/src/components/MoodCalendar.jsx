@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
 import { API_URL } from '../config';
-
-const MOOD_EMOJI = { 1: '😞', 2: '😟', 3: '😐', 4: '🙂', 5: '😌' };
-const MOOD_LABELS = { 1: 'Low', 2: 'Down', 3: 'Okay', 4: 'Good', 5: 'Calm' };
+import { emojiForEntry, labelForEntry } from '../utils/emotions';
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const MONTH_NAMES = [
@@ -60,7 +58,7 @@ function MoodCalendar({ userId, month, year }) {
       .catch(() => {});
   }, [userId]);
 
-  const entryByDate = new Map(entries.map((e) => [e.entry_date, e.mood_level]));
+  const entryByDate = new Map(entries.map((e) => [e.entry_date, e]));
   const journalByDate = new Map(
     journalEntries.map((j) => [j.created_at.slice(0, 10), j.transcript])
   );
@@ -69,7 +67,7 @@ function MoodCalendar({ userId, month, year }) {
   const daysInMonth = new Date(displayYear, displayMonth + 1, 0).getDate();
   const firstDayOfWeek = new Date(displayYear, displayMonth, 1).getDay();
 
-  const selectedMoodLevel = selectedDate ? entryByDate.get(selectedDate) : null;
+  const selectedEntry = selectedDate ? entryByDate.get(selectedDate) : null;
   const selectedJournal = selectedDate ? journalByDate.get(selectedDate) : null;
 
   return (
@@ -110,8 +108,8 @@ function MoodCalendar({ userId, month, year }) {
           const dateStr = toDateStr(displayYear, displayMonth, day);
           const isToday = dateStr === todayStr;
           const isFuture = dateStr > todayStr;
-          const moodLevel = entryByDate.get(dateStr);
-          const isLogged = moodLevel !== undefined;
+          const dayEntry = entryByDate.get(dateStr);
+          const isLogged = dayEntry !== undefined;
           const clickable = isLogged;
 
           let content;
@@ -125,7 +123,7 @@ function MoodCalendar({ userId, month, year }) {
             cellStyle.backgroundColor = '#2b4d3f';
             content = (
               <>
-                {isLogged && <span style={{ fontSize: '16px' }}>{MOOD_EMOJI[moodLevel]}</span>}
+                {isLogged && <span style={{ fontSize: '16px' }}>{emojiForEntry(dayEntry)}</span>}
                 <span style={{ fontSize: '10px' }} className="text-white/90">{day}</span>
               </>
             );
@@ -139,7 +137,7 @@ function MoodCalendar({ userId, month, year }) {
           } else if (isLogged) {
             content = (
               <>
-                <span style={{ fontSize: '16px' }}>{MOOD_EMOJI[moodLevel]}</span>
+                <span style={{ fontSize: '16px' }}>{emojiForEntry(dayEntry)}</span>
                 <span className="text-brand-ink/60" style={{ fontSize: '10px' }}>{day}</span>
               </>
             );
@@ -191,10 +189,10 @@ function MoodCalendar({ userId, month, year }) {
               </button>
             </div>
 
-            {selectedMoodLevel && (
+            {selectedEntry && (
               <div className="flex items-center gap-3 bg-brand-ink/5 rounded-xl p-4 mb-4">
-                <span className="text-3xl">{MOOD_EMOJI[selectedMoodLevel]}</span>
-                <p className="font-medium">{MOOD_LABELS[selectedMoodLevel]}</p>
+                <span className="text-3xl">{emojiForEntry(selectedEntry)}</span>
+                <p className="font-medium">{labelForEntry(selectedEntry)}</p>
               </div>
             )}
 

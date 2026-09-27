@@ -808,6 +808,92 @@ app.get('/psychologists/:id/availability', async (req, res) => {
   res.json(result);
 });
 
+// A resident only counts as this psychologist's client once they've actually
+// had a booking together that wasn't cancelled/declined -- matches the same
+// "qualifying booking" filter used for slot-taken checks above.
+async function getClientResidentIds(psychologistId) {
+  const { data, error } = await supabase
+    .from('Booking')
+    .select('resident_id')
+    .eq('psychologist_id', psychologistId)
+    .not('status', 'in', '(cancelled,declined)');
+  if (error) return { error };
+  return { ids: [...new Set((data || []).map((b) => b.resident_id))] };
+}
+
+// GET /psychologists/me/clients — roster for the "My Clients" page: every
+// resident who has (or had) a real booking with this psychologist, so they can
+// review wellness check-ins before a session.
+app.get('/psychologists/me/clients', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { ids: residentIds, error: idsError } = await getClientResidentIds(psychologistId);
+  if (idsError) return res.status(500).json({ error: idsError.message });
+  if (residentIds.length === 0) return res.json([]);
+
+  const { data: bookings, error: bookingsError } = await supabase
+    .from('Booking')
+    .select('resident_id, schedule, status')
+    .eq('psychologist_id', psychologistId)
+    .in('resident_id', residentIds)
+    .order('schedule', { ascending: false });
+  if (bookingsError) return res.status(500).json({ error: bookingsError.message });
+
+  const { data: users, error: usersError } = await supabase
+    .from('User')
+    .select('user_id, name, email')
+    .in('user_id', residentIds);
+  if (usersError) return res.status(500).json({ error: usersError.message });
+
+  const clients = users.map((u) => {
+    const theirBookings = bookings.filter((b) => b.resident_id === u.user_id);
+    return {
+      user_id: u.user_id,
+      name: u.name,
+      email: u.email,
+      total_sessions: theirBookings.length,
+      last_session: theirBookings[0]?.schedule || null,
+    };
+  });
+
+  clients.sort((a, b) => new Date(b.last_session || 0) - new Date(a.last_session || 0));
+  res.json(clients);
+});
+
+// GET /psychologists/me/clients/:residentId/wellness — mood + wellness-check
+// history for one client, gated on that resident actually being this
+// psychologist's client (see getClientResidentIds above).
+app.get('/psychologists/me/clients/:residentId/wellness', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const residentId = Number(req.params.residentId);
+  const { ids: residentIds, error: idsError } = await getClientResidentIds(psychologistId);
+  if (idsError) return res.status(500).json({ error: idsError.message });
+  if (!residentIds.includes(residentId)) {
+    return res.status(403).json({ error: 'This resident is not one of your clients' });
+  }
+
+  const { data: moodEntries, error: moodError } = await supabase
+    .from('Mood_Entry')
+    .select('mood_level, mood_label, entry_date')
+    .eq('user_id', residentId)
+    .order('entry_date', { ascending: false })
+    .limit(30);
+  if (moodError) return res.status(500).json({ error: moodError.message });
+
+  const { data: assessments, error: assessmentError } = await supabase
+    .from('Assessment_Result')
+    .select('*')
+    .eq('user_id', residentId)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (assessmentError) return res.status(500).json({ error: assessmentError.message });
+
+  res.json({ mood_entries: moodEntries, assessments });
+});
+
 // GET /admin/psychologists?status=pending|verified|all (default: pending)
 app.get('/admin/psychologists', requireAuth, requireRole('admin'), async (req, res) => {
   const status = req.query.status || 'pending';
@@ -2216,7 +2302,7 @@ app.post('/crisis-companion/chat', async (req, res) => {
 });
 
 app.post('/mood-entries', async (req, res) => {
-  const { user_id, mood_level } = req.body;
+  const { user_id, mood_level, mood_label } = req.body;
   if (!user_id || !mood_level) {
     return res.status(400).json({ error: 'user_id and mood_level are required' });
   }
@@ -2234,7 +2320,7 @@ app.post('/mood-entries', async (req, res) => {
   if (existing && existing.length > 0) {
     const { data, error } = await supabase
       .from('Mood_Entry')
-      .update({ mood_level })
+      .update({ mood_level, mood_label: mood_label || null })
       .eq('mood_id', existing[0].mood_id)
       .select();
     if (error) return res.status(500).json({ error: error.message });
@@ -2243,7 +2329,7 @@ app.post('/mood-entries', async (req, res) => {
 
   const { data, error } = await supabase
     .from('Mood_Entry')
-    .insert([{ user_id, mood_level, entry_date: today }])
+    .insert([{ user_id, mood_level, mood_label: mood_label || null, entry_date: today }])
     .select();
 
   if (error) return res.status(500).json({ error: error.message });

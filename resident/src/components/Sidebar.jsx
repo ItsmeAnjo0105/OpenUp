@@ -46,7 +46,7 @@ function Sidebar({ sidebarOpen, setSidebarOpen }) {
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
         md:translate-x-0 md:static`}
     >
-      <div className="px-5 py-6 flex items-center justify-between">
+      <div className="px-5 py-4 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-2xl">💚</span>
           <Link to="/dashboard" className="font-display text-xl font-semibold text-brand-primary">
@@ -61,7 +61,7 @@ function Sidebar({ sidebarOpen, setSidebarOpen }) {
         </button>
       </div>
 
-      <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
+      <nav className="flex-1 px-3 space-y-0.5 min-h-0">
         {modules.map((m) => {
           const isActive = location.pathname === m.path;
 
@@ -69,9 +69,9 @@ function Sidebar({ sidebarOpen, setSidebarOpen }) {
             return (
               <div
                 key={m.path}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-full text-brand-ink/35 text-sm cursor-not-allowed"
+                className="flex items-center gap-3 px-3 py-1.5 rounded-xl text-brand-ink/35 text-sm cursor-not-allowed"
               >
-                <span className="text-lg grayscale opacity-60">{m.icon}</span>
+                <span className="text-base grayscale opacity-60">{m.icon}</span>
                 <span>{m.label}</span>
               </div>
             );
@@ -81,14 +81,14 @@ function Sidebar({ sidebarOpen, setSidebarOpen }) {
             <Link
               key={m.path}
               to={m.path}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-full text-sm font-medium transition-colors ${
+              className={`flex items-center gap-3 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors ${
                 isActive
                   ? 'bg-brand-primary text-white'
                   : 'text-brand-ink/70 hover:bg-brand-ink/5'
               }`}
             >
-              <span className="text-lg">{m.icon}</span>
-              <span className="flex-1">{m.label}</span>
+              <span className="text-base shrink-0">{m.icon}</span>
+              <span className="flex-1 leading-tight">{m.label}</span>
               {m.path === '/notifications' && unreadCount > 0 && (
                 <span
                   className={`text-[11px] font-semibold min-w-4.5 h-4.5 px-1 rounded-full flex items-center justify-center ${
@@ -103,13 +103,13 @@ function Sidebar({ sidebarOpen, setSidebarOpen }) {
         })}
       </nav>
 
-      <div className="px-3 py-6 border-t border-brand-ink/10">
+      <div className="px-3 py-4 border-t border-brand-ink/10 shrink-0">
         {user && (
           <p className="px-3 text-xs text-brand-ink/50 mb-2 truncate">{user.email}</p>
         )}
         <button
           onClick={handleLogout}
-          className="w-full text-left px-3 py-2.5 rounded-full text-sm font-medium text-brand-ink/70 hover:bg-brand-ink/5"
+          className="w-full text-left px-3 py-2 rounded-full text-sm font-medium text-brand-ink/70 hover:bg-brand-ink/5"
         >
           Log out
         </button>

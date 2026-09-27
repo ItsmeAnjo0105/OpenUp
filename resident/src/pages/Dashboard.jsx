@@ -3,27 +3,28 @@ import { Link, useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, ResponsiveContainer } from 'recharts';
 import Layout from '../components/Layout';
 import ConfirmDialog from '../components/ConfirmDialog';
+import EmotionPicker from '../components/EmotionPicker';
+import MoodGate from '../components/MoodGate';
 import { API_URL } from '../config';
-
-const moods = [
-  { level: 1, label: 'Low', emoji: '😞' },
-  { level: 2, label: 'Down', emoji: '😕' },
-  { level: 3, label: 'Okay', emoji: '😐' },
-  { level: 4, label: 'Good', emoji: '🙂' },
-  { level: 5, label: 'Calm', emoji: '😌' },
-];
 
 function Dashboard() {
   const navigate = useNavigate();
   const [bookings, setBookings] = useState([]);
   const [moodEntries, setMoodEntries] = useState([]);
+  const [moodLoaded, setMoodLoaded] = useState(false);
+  const [moodGateDismissed, setMoodGateDismissed] = useState(false);
   const [savingMood, setSavingMood] = useState(false);
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   const loadMoodEntries = () => {
     fetch(`${API_URL}/mood-entries/user/${user.user_id}`)
       .then((res) => res.json())
-      .then((data) => setMoodEntries(Array.isArray(data) ? data : []))
+      .then((data) => {
+        setMoodEntries(Array.isArray(data) ? data : []);
+        setMoodLoaded(true);
+      })
+      // Leave moodLoaded false on failure -- the popup just won't show rather
+      // than risk nagging someone who already answered.
       .catch(() => {});
   };
 
@@ -124,13 +125,13 @@ function Dashboard() {
     }
   };
 
-  const handleLogMood = async (level) => {
+  const handleLogMood = async (emotion) => {
     setSavingMood(true);
     try {
       await fetch(`${API_URL}/mood-entries`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.user_id, mood_level: level }),
+        body: JSON.stringify({ user_id: user.user_id, mood_level: emotion.level, mood_label: emotion.label }),
       });
       loadMoodEntries();
     } catch {
@@ -145,6 +146,7 @@ function Dashboard() {
   const firstName = user.name.split(' ')[0];
   const today = new Date().toISOString().split('T')[0];
   const todayEntry = moodEntries.find((e) => e.entry_date === today);
+  const showMoodGate = moodLoaded && !todayEntry && !moodGateDismissed;
 
   const last7 = [...Array(7)].map((_, i) => {
     const d = new Date();
@@ -171,25 +173,12 @@ function Dashboard() {
 
         <div className="bg-brand-primary rounded-2xl p-6">
           <p className="text-white font-medium mb-4">How are you right now?</p>
-          <div className="flex justify-between">
-            {moods.map((m) => (
-              <button
-                key={m.level}
-                onClick={() => handleLogMood(m.level)}
-                disabled={savingMood}
-                className={`flex flex-col items-center gap-1 ${
-                  todayEntry?.mood_level === m.level ? 'scale-110' : 'opacity-80 hover:opacity-100'
-                } transition-transform`}
-              >
-                <span className={`text-3xl w-12 h-12 flex items-center justify-center rounded-full ${
-                  todayEntry?.mood_level === m.level ? 'bg-white' : 'bg-white/20'
-                }`}>
-                  {m.emoji}
-                </span>
-                <span className="text-xs text-white font-medium">{m.label}</span>
-              </button>
-            ))}
-          </div>
+          <EmotionPicker
+            selectedLabel={todayEntry?.mood_label}
+            onPick={handleLogMood}
+            disabled={savingMood}
+            variant="dark"
+          />
         </div>
 
         <Link
@@ -359,6 +348,13 @@ function Dashboard() {
       </div>
 
       <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
+      {showMoodGate && (
+        <MoodGate
+          user={user}
+          onLogged={() => { setMoodGateDismissed(true); loadMoodEntries(); }}
+          onSkip={() => setMoodGateDismissed(true)}
+        />
+      )}
     </Layout>
   );
 }

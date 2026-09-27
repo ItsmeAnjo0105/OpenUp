@@ -33,7 +33,7 @@ function PsychologistLayout({ children }) {
   if (checking) return null;
 
   return (
-    <div className="flex min-h-screen bg-brand-bg">
+    <div className="flex h-screen overflow-hidden bg-brand-bg">
       <ReminderBanner />
       <PsychologistSidebar user={user} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 

@@ -51,7 +51,12 @@ const SAFETY_ITEM = {
   text: "I've had thoughts of hurting myself or that life isn't worth living.",
 };
 
-const ALL_KEYS = [...SECTIONS.flatMap((s) => s.items.map((i) => i.key)), SAFETY_ITEM.key];
+// Flattened into one ordered list so the form can show one card at a time,
+// with each question still tagged by its section for the small label above it.
+const ALL_ITEMS = [
+  ...SECTIONS.flatMap((s) => s.items.map((i) => ({ ...i, section: s.title }))),
+  { ...SAFETY_ITEM, section: 'One last question' },
+];
 
 const BAND_COPY = {
   low: {
@@ -70,7 +75,9 @@ const BAND_COPY = {
 };
 
 function Assessment() {
-  const [step, setStep] = useState('intro'); // intro | form | results
+  const [step, setStep] = useState('intro'); // intro | consent | form | results
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [qIndex, setQIndex] = useState(0);
   const [answers, setAnswers] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
@@ -78,8 +85,6 @@ function Assessment() {
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   if (!user) return null;
-
-  const allAnswered = ALL_KEYS.every((k) => answers[k] !== undefined);
 
   const handleSubmit = async () => {
     setSubmitting(true);
@@ -123,7 +128,7 @@ function Assessment() {
           </p>
 
           <button
-            onClick={() => setStep('form')}
+            onClick={() => setStep('consent')}
             className="w-full bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors"
           >
             Start check-in
@@ -133,50 +138,120 @@ function Assessment() {
     );
   }
 
-  if (step === 'form') {
+  if (step === 'consent') {
     return (
       <Layout>
-        <div className="max-w-xl mx-auto space-y-6 pb-10">
-          <h1 className="font-display text-2xl font-semibold">OpenUp Quick Wellness Check</h1>
+        <div className="max-w-md mx-auto bg-brand-surface rounded-2xl shadow-sm p-8">
+          <h1 className="font-display text-xl font-semibold mb-1">Before you begin</h1>
+          <p className="text-brand-ink/60 text-sm mb-5">Please read this before starting your check-in.</p>
 
-          {SECTIONS.map((section) => (
-            <div key={section.key} className="bg-brand-surface rounded-2xl shadow-sm p-6">
-              <h2 className="font-display text-lg font-semibold mb-4">{section.title}</h2>
-              <div className="space-y-5">
-                {section.items.map((item) => (
-                  <div key={item.key}>
-                    <p className="text-sm text-brand-ink/80 mb-2">{item.text}</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      {SCALE.map((s) => (
-                        <button
-                          key={s.value}
-                          onClick={() => setAnswers({ ...answers, [item.key]: s.value })}
-                          className={`text-xs font-medium px-3 py-2 rounded-lg border transition-colors ${
-                            answers[item.key] === s.value
-                              ? 'bg-brand-primary text-white border-brand-primary'
-                              : 'border-brand-ink/15 text-brand-ink/70 hover:bg-brand-ink/5'
-                          }`}
-                        >
-                          {s.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
+          <div className="space-y-4 text-sm text-brand-ink/80 mb-6">
+            <div>
+              <p className="font-medium text-brand-ink">How your answers are used</p>
+              <p className="text-brand-ink/60">
+                Your answers are used only to score this check-in and, if a score suggests it, to
+                gently point you toward the AI Crisis Companion or booking a counseling session.
+                They are not used for research, insurance, or anything outside OpenUp.
+              </p>
             </div>
-          ))}
+            <div>
+              <p className="font-medium text-brand-ink">Who can see your answers</p>
+              <p className="text-brand-ink/60">
+                You, and any psychologist you've had (or currently have) a booking with — they can
+                see your check-in history to prepare for your session. No admin, LGU account, or
+                other psychologist can view it.
+              </p>
+            </div>
+            <div>
+              <p className="font-medium text-brand-ink">Voluntary, always</p>
+              <p className="text-brand-ink/60">
+                You can stop or leave this check-in at any point without submitting anything, and
+                retaking it never affects your access to any other part of OpenUp.
+              </p>
+            </div>
+            <div>
+              <p className="font-medium text-brand-ink">What this isn't</p>
+              <p className="text-brand-ink/60">
+                OpenUp is a student capstone project, not a licensed medical record system, and this
+                check-in isn't reviewed by a clinician in real time. If you're in crisis or need
+                immediate help, please contact a local emergency line or crisis hotline directly.
+              </p>
+            </div>
+          </div>
 
-          <div className="bg-brand-surface rounded-2xl shadow-sm p-6 border-2 border-brand-primary/20">
-            <h2 className="font-display text-lg font-semibold mb-4">One last question</h2>
-            <p className="text-sm text-brand-ink/80 mb-2">{SAFETY_ITEM.text}</p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <label className="flex items-start gap-2.5 mb-5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={consentChecked}
+              onChange={(e) => setConsentChecked(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-brand-primary shrink-0"
+            />
+            <span className="text-sm text-brand-ink/80">
+              I've read this and agree to continue.
+            </span>
+          </label>
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => setStep('intro')}
+              className="flex-1 border border-brand-ink/15 text-brand-ink py-2.5 rounded-full font-medium hover:bg-brand-ink/5 transition-colors"
+            >
+              Back
+            </button>
+            <button
+              onClick={() => setStep('form')}
+              disabled={!consentChecked}
+              className="flex-1 bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors disabled:opacity-40"
+            >
+              Continue
+            </button>
+          </div>
+          <Link to="/dashboard" className="block text-center text-xs text-brand-ink/40 mt-4 hover:text-brand-ink/60">
+            Maybe later
+          </Link>
+        </div>
+      </Layout>
+    );
+  }
+
+  if (step === 'form') {
+    const item = ALL_ITEMS[qIndex];
+    const isLast = qIndex === ALL_ITEMS.length - 1;
+    const canAdvance = answers[item.key] !== undefined;
+
+    const goBack = () => {
+      if (qIndex === 0) { setStep('consent'); return; }
+      setQIndex(qIndex - 1);
+    };
+
+    const goNext = () => {
+      if (isLast) { handleSubmit(); return; }
+      setQIndex(qIndex + 1);
+    };
+
+    return (
+      <Layout>
+        <div className="max-w-md mx-auto">
+          <div className="flex items-center justify-between mb-2 text-xs text-brand-ink/50 font-medium">
+            <span>{item.section}</span>
+            <span>Question {qIndex + 1} of {ALL_ITEMS.length}</span>
+          </div>
+          <div className="h-1.5 bg-brand-ink/10 rounded-full mb-6 overflow-hidden">
+            <div
+              className="h-full bg-brand-primary rounded-full transition-all duration-300"
+              style={{ width: `${((qIndex + 1) / ALL_ITEMS.length) * 100}%` }}
+            />
+          </div>
+
+          <div className={`bg-brand-surface rounded-2xl shadow-sm p-6 ${isLast ? 'border-2 border-brand-primary/20' : ''}`}>
+            <p className="text-base text-brand-ink/90 mb-5 min-h-18">{item.text}</p>
+            <div className="grid grid-cols-2 gap-2">
               {SCALE.map((s) => (
                 <button
                   key={s.value}
-                  onClick={() => setAnswers({ ...answers, [SAFETY_ITEM.key]: s.value })}
-                  className={`text-xs font-medium px-3 py-2 rounded-lg border transition-colors ${
-                    answers[SAFETY_ITEM.key] === s.value
+                  onClick={() => setAnswers({ ...answers, [item.key]: s.value })}
+                  className={`text-xs font-medium px-3 py-3 rounded-lg border transition-colors ${
+                    answers[item.key] === s.value
                       ? 'bg-brand-primary text-white border-brand-primary'
                       : 'border-brand-ink/15 text-brand-ink/70 hover:bg-brand-ink/5'
                   }`}
@@ -187,13 +262,21 @@ function Assessment() {
             </div>
           </div>
 
-          <button
-            onClick={handleSubmit}
-            disabled={!allAnswered || submitting}
-            className="w-full bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors disabled:opacity-40"
-          >
-            {submitting ? 'Saving...' : 'See my results'}
-          </button>
+          <div className="flex gap-2 mt-6">
+            <button
+              onClick={goBack}
+              className="flex-1 border border-brand-ink/15 text-brand-ink py-2.5 rounded-full font-medium hover:bg-brand-ink/5 transition-colors"
+            >
+              Back
+            </button>
+            <button
+              onClick={goNext}
+              disabled={!canAdvance || submitting}
+              className="flex-1 bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors disabled:opacity-40"
+            >
+              {isLast ? (submitting ? 'Saving...' : 'See my results') : 'Next'}
+            </button>
+          </div>
         </div>
       </Layout>
     );
@@ -210,8 +293,8 @@ function Assessment() {
         </div>
         <h1 className="font-display text-2xl font-semibold">Thank you for checking in</h1>
         <p className="text-brand-ink/60 text-sm">
-          Your responses have been saved privately. It's not a diagnosis, and no one else can see
-          your answers.
+          Your responses have been saved. It's not a diagnosis -- your psychologist (if you have a
+          booking with one) can see this history to prepare for your session; no one else can.
         </p>
 
         <div className="bg-brand-primary/10 rounded-2xl p-5 text-left flex items-center justify-between">

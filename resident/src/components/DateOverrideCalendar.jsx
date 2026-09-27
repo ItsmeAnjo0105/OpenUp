@@ -280,7 +280,7 @@ function DateOverrideCalendar({ weeklyWindows, onRemoveWeeklyWindow }) {
                   confirmLabel: 'Mark closed',
                   onConfirm: markClosed,
                 })}
-                className="text-xs font-medium px-3 py-1.5 rounded-full border border-red-200 text-red-600"
+                className="text-xs font-medium px-3 py-1.5 rounded-full border border-red-200 text-red-600 transition-colors hover:bg-red-600 hover:text-white hover:border-red-600"
               >
                 Mark this date as closed
               </button>
@@ -292,7 +292,7 @@ function DateOverrideCalendar({ weeklyWindows, onRemoveWeeklyWindow }) {
                     confirmLabel: 'Reset',
                     onConfirm: resetToDefault,
                   })}
-                  className="text-xs font-medium px-3 py-1.5 rounded-full border border-brand-ink/15 text-brand-ink/70"
+                  className="text-xs font-medium px-3 py-1.5 rounded-full border border-brand-ink/15 text-brand-ink/70 transition-colors hover:bg-brand-ink/10"
                 >
                   Reset to weekly default
                 </button>

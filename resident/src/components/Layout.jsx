@@ -6,7 +6,7 @@ function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="flex min-h-screen bg-brand-bg">
+    <div className="flex h-screen overflow-hidden bg-brand-bg">
       <ReminderBanner />
       <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 

@@ -1,5 +1,6 @@
 import { useParams } from 'react-router-dom';
 import Layout from '../components/Layout';
+import PsychologistLayout from '../components/PsychologistLayout';
 import CounselingSession from '../CounselingSession';
 
 function Session() {
@@ -8,10 +9,12 @@ function Session() {
 
   if (!user) return null;
 
+  const LayoutForRole = user.role === 'psychologist' ? PsychologistLayout : Layout;
+
   return (
-    <Layout>
+    <LayoutForRole>
       <CounselingSession bookingId={bookingId} name={user.name} role={user.role} />
-    </Layout>
+    </LayoutForRole>
   );
 }
 

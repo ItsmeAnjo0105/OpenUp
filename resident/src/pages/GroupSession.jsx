@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import Layout from '../components/Layout';
+import PsychologistLayout from '../components/PsychologistLayout';
 import { API_URL } from '../config';
 
 function GroupSession() {
@@ -44,11 +45,13 @@ function GroupSession() {
 
   if (!user) return null;
 
+  const LayoutForRole = user.role === 'psychologist' ? PsychologistLayout : Layout;
+
   return (
-    <Layout>
+    <LayoutForRole>
       <h2 className="font-display text-2xl font-semibold mb-4">Group Session</h2>
       <div ref={jitsiContainerRef} />
-    </Layout>
+    </LayoutForRole>
   );
 }
 

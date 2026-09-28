@@ -22,6 +22,8 @@ function AdminDashboard() {
   const [userSearch, setUserSearch] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState('');
   const [userStatusFilter, setUserStatusFilter] = useState('');
+  const [escalations, setEscalations] = useState([]);
+  const [escalationError, setEscalationError] = useState('');
   const navigate = useNavigate();
   const user = getStoredUser();
 
@@ -49,6 +51,16 @@ function AdminDashboard() {
         else setBookingError(data?.error || 'Could not load bookings.');
       })
       .catch(() => setBookingError('Could not load bookings.'));
+  };
+
+  const loadEscalations = () => {
+    fetch(`${API_URL}/admin/escalations`, { headers: authHeader() })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (ok && Array.isArray(data)) setEscalations(data);
+        else setEscalationError(data?.error || 'Could not load escalations.');
+      })
+      .catch(() => setEscalationError('Could not reach the server.'));
   };
 
   const loadVerifiedPsychologists = () => {
@@ -101,6 +113,7 @@ function AdminDashboard() {
         loadVerifiedPsychologists();
         loadFinance();
         loadUsers();
+        loadEscalations();
       })
       .catch(() => {
         localStorage.removeItem('openup_token');
@@ -393,6 +406,35 @@ function AdminDashboard() {
                       Reject
                     </button>
                   </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-purple-50 border border-purple-200 rounded-2xl p-6 mt-6">
+          <h2 className="font-display text-lg font-semibold text-purple-900 mb-1">Emergency escalations</h2>
+          <p className="text-xs text-purple-900/70 mb-4">
+            Raised by a psychologist during a live session. Review these as soon as possible.
+          </p>
+
+          {escalationError && <p className="text-sm text-red-600 mb-3">{escalationError}</p>}
+
+          {escalations.length === 0 ? (
+            <p className="text-sm text-purple-900/60">No escalations raised.</p>
+          ) : (
+            <div className="space-y-3">
+              {escalations.map((e) => (
+                <div key={e.escalation_id} className="bg-white border border-purple-200 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-sm font-semibold">
+                      {e.Booking?.User?.name || 'A resident'} · with {e.Psychologist?.User?.name || 'a psychologist'}
+                    </p>
+                    <span className="text-xs text-brand-ink/50">
+                      {new Date(e.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}
+                    </span>
+                  </div>
+                  {e.note && <p className="text-sm text-brand-ink/70 mt-1">"{e.note}"</p>}
                 </div>
               ))}
             </div>

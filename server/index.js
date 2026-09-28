@@ -1024,6 +1024,18 @@ app.delete('/admin/users/:id', requireAuth, requireRole('admin'), async (req, re
   res.json({ deleted: true, ...data[0] });
 });
 
+// GET /admin/escalations — every emergency flag a psychologist has raised, most
+// recent first, so the Notification sent alongside it has somewhere real to lead.
+app.get('/admin/escalations', requireAuth, requireRole('admin'), async (req, res) => {
+  const { data, error } = await supabase
+    .from('Emergency_Escalation')
+    .select('*, Psychologist(User(name)), Booking(resident_id, schedule, User(name))')
+    .order('created_at', { ascending: false });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
 // GET /admin/bookings?status=pending|confirmed|all (default: all except cancelled/declined)
 app.get('/admin/bookings', requireAuth, requireRole('admin'), async (req, res) => {
   const status = req.query.status;
@@ -1385,6 +1397,223 @@ app.patch('/bookings/:id/reschedule', requireAuth, requireRole('resident'), asyn
     return res.status(500).json({ error: error.message });
   }
 
+  res.json(data);
+});
+
+// POST /bookings/:id/psychologist-cancel — mirrors the resident cancel route,
+// ownership checked against the psychologist side instead. Reuses
+// admin_cancel_booking since the unwind logic (release credit, refund/cancel
+// Payment) doesn't depend on who initiated it.
+app.post('/bookings/:id/psychologist-cancel', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { data: psychologist, error: psychError } = await supabase
+    .from('Psychologist')
+    .select('psychologist_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  if (psychError || !psychologist) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data: booking, error: findError } = await supabase
+    .from('Booking')
+    .select('psychologist_id')
+    .eq('booking_id', req.params.id)
+    .single();
+
+  if (findError || !booking) return res.status(404).json({ error: 'Booking not found' });
+  if (booking.psychologist_id !== psychologist.psychologist_id) return res.status(403).json({ error: 'This is not your booking' });
+
+  const { data, error } = await supabase.rpc('admin_cancel_booking', { p_booking_id: req.params.id });
+
+  if (error) {
+    if (error.message === 'BOOKING_NOT_FOUND') return res.status(404).json({ error: 'Booking not found' });
+    if (error.message === 'ALREADY_TERMINAL') return res.status(409).json({ error: 'This booking is already cancelled or declined' });
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json(data);
+});
+
+// PATCH /bookings/:id/psychologist-reschedule — body: { schedule }. See
+// db/psychologist_reschedule_booking.sql for why this leaves status/Payment/
+// Care_Credit untouched, unlike the resident-initiated reschedule above.
+app.patch('/bookings/:id/psychologist-reschedule', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { schedule } = req.body;
+  if (!schedule) return res.status(400).json({ error: 'schedule is required' });
+
+  const { data: psychologist, error: psychError } = await supabase
+    .from('Psychologist')
+    .select('psychologist_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  if (psychError || !psychologist) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data, error } = await supabase.rpc('psychologist_reschedule_booking', {
+    p_booking_id: req.params.id,
+    p_psychologist_id: psychologist.psychologist_id,
+    p_new_schedule: schedule,
+  });
+
+  if (error) {
+    if (error.message === 'BOOKING_NOT_FOUND') return res.status(404).json({ error: 'Booking not found' });
+    if (error.message === 'NOT_YOUR_BOOKING') return res.status(403).json({ error: 'This is not your booking' });
+    if (error.message === 'ALREADY_TERMINAL') return res.status(409).json({ error: 'This booking is already cancelled or declined' });
+    if (error.code === '23505') return res.status(409).json({ error: 'You already have a booking at that time' });
+    return res.status(500).json({ error: error.message });
+  }
+
+  // Best-effort: the reschedule already succeeded either way, so a failed
+  // notification insert shouldn't fail this response.
+  await supabase.from('Notification').insert([{
+    user_id: data.booking.resident_id,
+    type: 'system',
+    title: 'Session rescheduled',
+    body: `Your psychologist moved your session to ${new Date(data.booking.schedule).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}.`,
+    link: `/session/${req.params.id}`,
+    read: false,
+  }]);
+
+  res.json(data);
+});
+
+// GET/PUT /bookings/:id/notes — private psychologist-only session notes (see
+// db/session_notes.sql). Never exposed to the resident on this booking.
+app.get('/bookings/:id/notes', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { data: psychologist, error: psychError } = await supabase
+    .from('Psychologist')
+    .select('psychologist_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  if (psychError || !psychologist) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data: booking, error: findError } = await supabase
+    .from('Booking')
+    .select('psychologist_id')
+    .eq('booking_id', req.params.id)
+    .single();
+
+  if (findError || !booking) return res.status(404).json({ error: 'Booking not found' });
+  if (booking.psychologist_id !== psychologist.psychologist_id) return res.status(403).json({ error: 'This is not your booking' });
+
+  const { data, error } = await supabase
+    .from('Session_Note')
+    .select('body, created_at, updated_at')
+    .eq('booking_id', req.params.id)
+    .maybeSingle();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || { body: '' });
+});
+
+app.put('/bookings/:id/notes', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { body } = req.body;
+  if (body === undefined) return res.status(400).json({ error: 'body is required' });
+
+  const { data: psychologist, error: psychError } = await supabase
+    .from('Psychologist')
+    .select('psychologist_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  if (psychError || !psychologist) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data: booking, error: findError } = await supabase
+    .from('Booking')
+    .select('psychologist_id')
+    .eq('booking_id', req.params.id)
+    .single();
+
+  if (findError || !booking) return res.status(404).json({ error: 'Booking not found' });
+  if (booking.psychologist_id !== psychologist.psychologist_id) return res.status(403).json({ error: 'This is not your booking' });
+
+  const { data: existing } = await supabase
+    .from('Session_Note')
+    .select('note_id')
+    .eq('booking_id', req.params.id)
+    .maybeSingle();
+
+  if (existing) {
+    const { data, error } = await supabase
+      .from('Session_Note')
+      .update({ body, updated_at: new Date().toISOString() })
+      .eq('note_id', existing.note_id)
+      .select('body, created_at, updated_at');
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json(data[0]);
+  }
+
+  const { data, error } = await supabase
+    .from('Session_Note')
+    .insert([{ booking_id: req.params.id, psychologist_id: psychologist.psychologist_id, body }])
+    .select('body, created_at, updated_at');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data[0]);
+});
+
+// POST /bookings/:id/escalate — see db/emergency_escalation.sql: this app has no
+// real integration with police/EMS/a crisis hotline, so this raises the session
+// urgently for every admin to see and act on, and never claims emergency
+// services were actually contacted.
+app.post('/bookings/:id/escalate', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { note } = req.body;
+
+  const { data: psychologist, error: psychError } = await supabase
+    .from('Psychologist')
+    .select('psychologist_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  if (psychError || !psychologist) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data: booking, error: findError } = await supabase
+    .from('Booking')
+    .select('psychologist_id')
+    .eq('booking_id', req.params.id)
+    .single();
+
+  if (findError || !booking) return res.status(404).json({ error: 'Booking not found' });
+  if (booking.psychologist_id !== psychologist.psychologist_id) return res.status(403).json({ error: 'This is not your booking' });
+
+  const { data: escalation, error } = await supabase
+    .from('Emergency_Escalation')
+    .insert([{ booking_id: req.params.id, psychologist_id: psychologist.psychologist_id, note: note || null }])
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  const { data: admins } = await supabase.from('User').select('user_id').eq('role', 'admin');
+  if (admins && admins.length > 0) {
+    await supabase.from('Notification').insert(
+      admins.map((a) => ({
+        user_id: a.user_id,
+        type: 'system',
+        title: 'Emergency escalation raised',
+        body: `A psychologist flagged booking #${req.params.id} as an emergency. Review it as soon as possible.`,
+        link: '/admin/dashboard',
+        read: false,
+      }))
+    );
+  }
+
+  res.status(201).json(escalation[0]);
+});
+
+// GET /bookings/:id — used by the Session page to render the right controls
+// (reschedule/cancel/notes/escalate for the psychologist). Gated the same way
+// as the chat: only the two participants on this specific booking.
+app.get('/bookings/:id', requireAuth, async (req, res) => {
+  const role = await getBookingParticipantRole(req.params.id, req.user);
+  if (!role) return res.status(403).json({ error: 'You are not part of this session' });
+
+  const { data, error } = await supabase
+    .from('Booking')
+    .select('*, User(name), Psychologist(psychologist_id, User(name))')
+    .eq('booking_id', req.params.id)
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'Booking not found' });
   res.json(data);
 });
 
@@ -1807,6 +2036,42 @@ app.get('/group-sessions', async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
+});
+
+// GET /psychologists/me/group-sessions — the ones this psychologist is hosting,
+// for the "Facilitate Session" view (My Clients has the roster, this has the
+// sessions themselves).
+app.get('/psychologists/me/group-sessions', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data, error } = await supabase
+    .from('Group_Session')
+    .select('*')
+    .eq('psychologist_id', psychologistId)
+    .order('schedule', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// POST /group-sessions — schedules a new one this psychologist will host. Without
+// this there'd be no way to ever create a Group_Session row, so "Facilitate
+// Session" would have nothing to facilitate.
+app.post('/group-sessions', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { topic, schedule } = req.body;
+  if (!topic || !schedule) return res.status(400).json({ error: 'topic and schedule are required' });
+
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data, error } = await supabase
+    .from('Group_Session')
+    .insert([{ psychologist_id: psychologistId, topic, schedule }])
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data[0]);
 });
 
 // Reuses the same JWT-signing logic as /jitsi-token, but keyed by group_session_id

@@ -1,20 +1,29 @@
+import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 const items = [
-  { label: 'Dashboard', path: '/psychologist/dashboard', icon: '🏠' },
-  { label: 'Appointment Requests', path: '/psychologist/requests', icon: '📥' },
-  { label: 'My Clients', path: '/psychologist/clients', icon: '👥' },
-  { label: 'Anonymous Chats', path: '/psychologist/chats', icon: '💬' },
-  { label: 'Group Sessions', path: '/psychologist/group-sessions', icon: '🧑‍🤝‍🧑' },
-  { label: 'Notes', path: '/psychologist/notes', icon: '📝' },
-  { label: 'Schedule', path: '/psychologist/schedule', icon: '📅' },
-  { label: 'Reports', path: '/psychologist/reports', icon: '📊' },
-  { label: 'Profile', path: '/psychologist/profile', icon: '👤' },
+  { label: 'Dashboard', path: '/psychologist/dashboard', icon: '🏠', color: 'bg-emerald-400/20' },
+  { label: 'Appointment Requests', path: '/psychologist/requests', icon: '📥', color: 'bg-sky-400/20' },
+  { label: 'My Clients', path: '/psychologist/clients', icon: '👥', color: 'bg-indigo-400/20' },
+  { label: 'Anonymous Chats', path: '/psychologist/chats', icon: '💬', color: 'bg-violet-400/20' },
+  { label: 'Group Sessions', path: '/psychologist/group-sessions', icon: '🧑‍🤝‍🧑', color: 'bg-teal-400/20' },
+  { label: 'Notes', path: '/psychologist/notes', icon: '📝', color: 'bg-amber-400/20' },
+  { label: 'Schedule', path: '/psychologist/schedule', icon: '📅', color: 'bg-cyan-400/20' },
+  { label: 'Reports', path: '/psychologist/reports', icon: '📊', color: 'bg-lime-400/20' },
+  { label: 'Profile', path: '/psychologist/profile', icon: '👤', color: 'bg-fuchsia-400/20' },
 ];
 
 function PsychologistSidebar({ user, sidebarOpen, setSidebarOpen }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('openup_sidebar_collapsed') === 'true');
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      localStorage.setItem('openup_sidebar_collapsed', String(!prev));
+      return !prev;
+    });
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('openup_token');
@@ -22,55 +31,111 @@ function PsychologistSidebar({ user, sidebarOpen, setSidebarOpen }) {
     navigate('/');
   };
 
+  const initials = (user.name || '?').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+
   return (
     <aside
-      className={`w-64 min-h-screen bg-brand-surface border-r border-brand-ink/10 flex flex-col
-        fixed left-0 top-0 h-full z-50 transition-transform duration-300
+      className={`${collapsed ? 'w-20' : 'w-64'} min-h-screen overflow-hidden flex flex-col text-white
+        fixed left-0 top-0 h-full z-50 transition-[transform,width] duration-300
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-        md:translate-x-0 md:static`}
+        md:translate-x-0 md:relative`}
+      style={{ background: 'linear-gradient(160deg, #1F4438 0%, #16362C 55%, #102821 100%)' }}
     >
-      <div className="px-5 py-4 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="text-2xl">💚</span>
-          <Link to="/psychologist/dashboard" className="font-display text-xl font-semibold text-brand-primary">
-            OpenUp
-          </Link>
-        </div>
-        <button onClick={() => setSidebarOpen(false)} className="md:hidden text-xl text-brand-ink/50">
+      <div
+        className="absolute -top-16 -right-20 w-56 h-56 rounded-full pointer-events-none"
+        style={{ background: 'radial-gradient(circle, rgba(94,214,163,0.18) 0%, transparent 70%)' }}
+      />
+      <div
+        className="absolute bottom-0 -left-16 w-48 h-48 rounded-full pointer-events-none"
+        style={{ background: 'radial-gradient(circle, rgba(94,214,163,0.10) 0%, transparent 70%)' }}
+      />
+
+      <div className={`relative px-5 py-5 flex items-start justify-between shrink-0 ${collapsed ? 'px-3' : ''}`}>
+        <Link to="/psychologist/dashboard" className="flex items-center gap-2.5 min-w-0">
+          <span
+            className="w-9 h-9 rounded-full flex items-center justify-center text-lg shrink-0"
+            style={{ background: 'linear-gradient(135deg, #5ED6A3, #2F5D50)' }}
+          >
+            💚
+          </span>
+          {!collapsed && (
+            <div className="min-w-0">
+              <p className="font-display text-lg font-bold leading-tight truncate">OpenUp</p>
+              <p className="text-[10px] text-white/50 leading-tight truncate">For Psychologists</p>
+            </div>
+          )}
+        </Link>
+        <button
+          onClick={toggleCollapsed}
+          className="hidden md:flex text-white/40 hover:text-white/80 text-sm mt-1 shrink-0"
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {collapsed ? '»' : '«'}
+        </button>
+        <button onClick={() => setSidebarOpen(false)} className="md:hidden text-xl text-white/50 shrink-0">
           ✕
         </button>
       </div>
 
-      <nav className="flex-1 px-3 space-y-0.5 min-h-0">
+      {!collapsed && (
+        <p className="relative px-5 text-[10px] font-semibold uppercase tracking-wider text-white/30 mb-2 mt-1">Main</p>
+      )}
+
+      <nav className="relative flex-1 px-3 space-y-0.5 min-h-0 overflow-y-auto">
         {items.map((item) => {
           const isActive = location.pathname === item.path;
           return (
             <Link
               key={item.path}
               to={item.path}
-              className={`flex items-center gap-3 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors ${
-                isActive ? 'bg-brand-primary text-white' : 'text-brand-ink/70 hover:bg-brand-ink/5'
-              }`}
+              title={collapsed ? item.label : undefined}
+              className={`flex items-center gap-3 px-2.5 py-2 rounded-xl text-sm font-medium transition-colors relative ${
+                collapsed ? 'justify-center' : ''
+              } ${isActive ? 'text-white shadow-sm' : 'text-white/70 hover:bg-white/5 hover:text-white'}`}
+              style={isActive ? { background: 'linear-gradient(90deg, #3FAE7F, #2F5D50)' } : undefined}
             >
-              <span className="text-base shrink-0">{item.icon}</span>
-              <span className="leading-tight">{item.label}</span>
+              {isActive && !collapsed && (
+                <span className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-full bg-emerald-300" />
+              )}
+              <span className={`w-8 h-8 rounded-full flex items-center justify-center text-base shrink-0 ${item.color}`}>
+                {item.icon}
+              </span>
+              {!collapsed && <span className="flex-1 leading-tight truncate">{item.label}</span>}
             </Link>
           );
         })}
       </nav>
 
-      <div className="px-4 py-4 border-t border-brand-ink/10 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-8 h-8 shrink-0 rounded-full bg-brand-primary text-white flex items-center justify-center text-sm font-semibold">
-            {user.name?.[0]?.toUpperCase() || '?'}
+      <div className="relative px-3 py-4 mt-1 shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+        {collapsed ? (
+          <div className="flex justify-center mb-2">
+            <span className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-xs font-semibold">
+              {initials}
+            </span>
           </div>
-          <div className="min-w-0">
-            <p className="text-sm font-medium truncate">{user.name}</p>
-            <p className="text-xs text-brand-ink/50">Psychologist</p>
-          </div>
-        </div>
-        <button onClick={handleLogout} className="text-xs text-brand-ink/50 hover:text-brand-ink shrink-0">
-          Log out
+        ) : (
+          <>
+            <p className="px-1 text-[10px] font-semibold uppercase tracking-wider text-white/30 mb-2">Account</p>
+            <div className="flex items-center gap-2.5 px-1 mb-3 min-w-0">
+              <span className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-xs font-semibold shrink-0">
+                {initials}
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">{user.name}</p>
+                <p className="text-[11px] text-white/50 truncate">Psychologist</p>
+              </div>
+            </div>
+          </>
+        )}
+        <button
+          onClick={handleLogout}
+          className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-sm font-medium text-white/70 hover:bg-white/5 hover:text-white transition-colors ${
+            collapsed ? 'justify-center' : ''
+          }`}
+          title={collapsed ? 'Log out' : undefined}
+        >
+          <span>⏻</span>
+          {!collapsed && <span>Log out</span>}
         </button>
       </div>
     </aside>

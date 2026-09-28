@@ -138,23 +138,30 @@ function BookingCalendar({ psychologistId, onSelect }) {
       {selectedDate && (
         <div className="mt-4 pt-4 border-t border-brand-ink/10">
           <p className="text-xs font-medium text-brand-ink/60 mb-2">
-            Available times on {new Date(`${selectedDate}T00:00:00`).toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric' })}
+            Times on {new Date(`${selectedDate}T00:00:00`).toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric' })}
           </p>
           <div className="flex flex-wrap gap-2">
-            {(availability[selectedDate]?.slots || []).map((slot) => (
-              <button
-                type="button"
-                key={slot}
-                onClick={() => pickSlot(slot)}
-                className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${
-                  selectedSlot === slot
-                    ? 'bg-brand-primary text-white border-brand-primary'
-                    : 'border-brand-ink/15 text-brand-ink/70 hover:border-brand-primary'
-                }`}
-              >
-                {formatHour12(slot)}
-              </button>
-            ))}
+            {(availability[selectedDate]?.all_slots || []).map((slot) => {
+              const isFree = availability[selectedDate]?.slots?.includes(slot);
+              const isSelected = selectedSlot === slot;
+
+              let slotClasses = 'text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ';
+              if (!isFree) slotClasses += 'bg-red-50 text-red-300 border-red-100 cursor-not-allowed';
+              else if (isSelected) slotClasses += 'bg-brand-primary text-white border-brand-primary';
+              else slotClasses += 'bg-green-100 text-green-800 border-green-200 hover:bg-green-200 cursor-pointer';
+
+              return (
+                <button
+                  type="button"
+                  key={slot}
+                  disabled={!isFree}
+                  onClick={() => pickSlot(slot)}
+                  className={slotClasses}
+                >
+                  {formatHour12(slot)}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

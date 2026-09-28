@@ -790,19 +790,27 @@ app.get('/psychologists/:id/availability', async (req, res) => {
     }
 
     const slotSet = new Set();
+    const allSlotSet = new Set();
     for (const w of dayWindows) {
       const startH = Number(w.start_time.split(':')[0]);
       const endH = Number(w.end_time.split(':')[0]);
       for (let h = startH; h < endH; h++) {
+        const label = `${String(h).padStart(2, '0')}:00`;
+        allSlotSet.add(label);
         const instant = phLocalInstant(dateStr, h);
         if (instant > now && !takenInstants.has(instant.getTime())) {
-          slotSet.add(`${String(h).padStart(2, '0')}:00`);
+          slotSet.add(label);
         }
       }
     }
 
     const slots = [...slotSet].sort();
-    result[dateStr] = { available: slots.length > 0, slots, customized: !!dateOverrides };
+    const allSlots = [...allSlotSet].sort();
+    // all_slots is every hour in the window whether or not it's actually
+    // bookable, so the resident calendar can show taken/past hours in red
+    // instead of just omitting them -- slots (the free subset) is unchanged
+    // for anything already relying on it.
+    result[dateStr] = { available: slots.length > 0, slots, all_slots: allSlots, customized: !!dateOverrides };
   }
 
   res.json(result);

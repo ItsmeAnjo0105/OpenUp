@@ -81,7 +81,7 @@ function PsychologistSidebar({ user, sidebarOpen, setSidebarOpen }) {
         <p className="relative px-5 text-[10px] font-semibold uppercase tracking-wider text-white/30 mb-2 mt-1">Main</p>
       )}
 
-      <nav className="relative flex-1 px-3 space-y-0.5 min-h-0 overflow-y-auto">
+      <nav className="relative flex-1 px-3 space-y-0.5 min-h-0 overflow-y-auto sidebar-scroll">
         {items.map((item) => {
           const isActive = location.pathname === item.path;
           return (

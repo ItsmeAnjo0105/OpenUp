@@ -87,7 +87,6 @@ function Assessment() {
   const [answers, setAnswers] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
-  const [safetyBannerDismissed, setSafetyBannerDismissed] = useState(false);
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   if (!user) return null;
@@ -281,8 +280,10 @@ function Assessment() {
     );
   }
 
-  // step === 'results'
-  const bandCopy = BAND_COPY[result.overall_band] || BAND_COPY.low;
+  // step === 'results' — a safety_flag always forces the "elevated" card+actions
+  // (Crisis Companion, booking) below regardless of section scores, since that's
+  // the one place those actions live now -- no separate duplicate banner.
+  const bandCopy = BAND_COPY[result.safety_flag ? 'elevated' : result.overall_band] || BAND_COPY.low;
 
   return (
     <Layout>
@@ -296,38 +297,17 @@ function Assessment() {
           booking with one) can see this history to prepare for your session; no one else can.
         </p>
 
-        {result.safety_flag && !safetyBannerDismissed && (
-          <div className="bg-purple-50 border border-purple-200 rounded-2xl p-5 text-left">
-            <p className="text-sm text-purple-900 mb-4">
-              You indicated having thoughts of hurting yourself, or that life isn't worth living.
-              You don't have to go through this alone -- a licensed psychologist can help, right now.
-            </p>
-            <Link
-              to="/crisis-companion"
-              className="block w-full text-center bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors mb-2"
-            >
-              Talk to AI Crisis Companion
-            </Link>
-            <Link
-              to="/booking"
-              className="block w-full text-center border border-purple-300 text-purple-900 py-2.5 rounded-full font-medium hover:bg-purple-100/50 transition-colors mb-2"
-            >
-              Book a counseling session
-            </Link>
-            <button
-              onClick={() => setSafetyBannerDismissed(true)}
-              className="w-full text-center text-purple-900/60 text-sm py-1 hover:text-purple-900"
-            >
-              Not Now
-            </button>
-          </div>
-        )}
-
         <div className="bg-brand-primary/10 rounded-2xl p-5 text-left flex items-center justify-between">
           <div>
             <p className="text-brand-primary text-sm font-medium">Today's check-in</p>
-            <p className="font-display text-xl font-semibold">{bandCopy.label}</p>
-            <p className="text-brand-ink/60 text-xs mt-1">{bandCopy.explanation}</p>
+            <p className="font-display text-xl font-semibold">
+              {result.safety_flag ? "Let's get you support" : bandCopy.label}
+            </p>
+            <p className="text-brand-ink/60 text-xs mt-1">
+              {result.safety_flag
+                ? "You indicated having thoughts of hurting yourself, or that life isn't worth living. You don't have to go through this alone."
+                : bandCopy.explanation}
+            </p>
           </div>
           <span className="text-2xl">📈</span>
         </div>

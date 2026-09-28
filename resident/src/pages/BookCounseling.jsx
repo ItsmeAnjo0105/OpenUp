@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import PsychologistCard from '../components/PsychologistCard';
 import BookingCalendar from '../components/BookingCalendar';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { API_URL } from '../config';
 
 function BookCounseling() {
@@ -11,6 +12,7 @@ function BookCounseling() {
   const [schedule, setSchedule] = useState('');
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
@@ -32,8 +34,19 @@ function BookCounseling() {
     setStatus('');
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
+    const dateLabel = new Date(schedule).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' });
+    setConfirmDialog({
+      title: 'Are you sure you want to continue?',
+      message: `You're requesting a session with ${selected.User?.name || 'this psychologist'} on ${dateLabel}. They'll need to accept it first.`,
+      confirmLabel: 'Confirm booking',
+      destructive: false,
+      onConfirm: submitBooking,
+    });
+  };
+
+  const submitBooking = async () => {
     setStatus('');
     setLoading(true);
 
@@ -123,6 +136,8 @@ function BookCounseling() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
     </Layout>
   );
 }

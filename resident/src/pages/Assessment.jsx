@@ -87,6 +87,7 @@ function Assessment() {
   const [answers, setAnswers] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
+  const [safetyBannerDismissed, setSafetyBannerDismissed] = useState(false);
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   if (!user) return null;
@@ -295,7 +296,7 @@ function Assessment() {
           booking with one) can see this history to prepare for your session; no one else can.
         </p>
 
-        {result.safety_flag && (
+        {result.safety_flag && !safetyBannerDismissed && (
           <div className="bg-purple-50 border border-purple-200 rounded-2xl p-5 text-left">
             <p className="text-sm text-purple-900 mb-4">
               You indicated having thoughts of hurting yourself, or that life isn't worth living.
@@ -309,10 +310,16 @@ function Assessment() {
             </Link>
             <Link
               to="/booking"
-              className="block w-full text-center border border-purple-300 text-purple-900 py-2.5 rounded-full font-medium hover:bg-purple-100/50 transition-colors"
+              className="block w-full text-center border border-purple-300 text-purple-900 py-2.5 rounded-full font-medium hover:bg-purple-100/50 transition-colors mb-2"
             >
               Book a counseling session
             </Link>
+            <button
+              onClick={() => setSafetyBannerDismissed(true)}
+              className="w-full text-center text-purple-900/60 text-sm py-1 hover:text-purple-900"
+            >
+              Not Now
+            </button>
           </div>
         )}
 

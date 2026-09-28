@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { API_URL } from '../config';
 
@@ -61,18 +61,24 @@ const ALL_ITEMS = [
 const BAND_COPY = {
   low: {
     label: 'Feeling steady',
+    explanation: 'Overall, this area seems steady for you right now.',
     primaryAction: { label: 'View in mood tracker', to: '/mood-tracker' },
   },
   moderate: {
     label: 'Some strain showing',
+    explanation: "There's some noticeable strain here — worth keeping an eye on.",
     primaryAction: { label: 'Book a counseling session', to: '/booking' },
   },
   elevated: {
     label: "Carrying a lot right now",
+    explanation: "This has been weighing on you a lot lately.",
     primaryAction: { label: 'Talk to AI Crisis Companion', to: '/crisis-companion' },
     secondaryAction: { label: 'Book a counseling session', to: '/booking' },
   },
 };
+
+const SECTION_LABELS = { mood: 'Mood', anxiety: 'Anxiety', stress: 'Stress & Coping' };
+const SECTION_MAX_SCORE = 15; // 5 items × 0-3 each
 
 function Assessment() {
   const [step, setStep] = useState('intro'); // intro | consent | form | results
@@ -81,7 +87,6 @@ function Assessment() {
   const [answers, setAnswers] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
-  const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   if (!user) return null;
@@ -95,13 +100,6 @@ function Assessment() {
         body: JSON.stringify({ user_id: user.user_id, answers }),
       });
       const data = await res.json();
-
-      if (data.safety_flag) {
-        // D1 > 0 — skip the results screen entirely and route straight to crisis support.
-        navigate('/crisis-companion');
-        return;
-      }
-
       setResult(data);
       setStep('results');
     } catch {
@@ -297,12 +295,55 @@ function Assessment() {
           booking with one) can see this history to prepare for your session; no one else can.
         </p>
 
+        {result.safety_flag && (
+          <div className="bg-purple-50 border border-purple-200 rounded-2xl p-5 text-left">
+            <p className="text-sm text-purple-900 mb-4">
+              You indicated having thoughts of hurting yourself, or that life isn't worth living.
+              You don't have to go through this alone -- a licensed psychologist can help, right now.
+            </p>
+            <Link
+              to="/crisis-companion"
+              className="block w-full text-center bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors mb-2"
+            >
+              Talk to AI Crisis Companion
+            </Link>
+            <Link
+              to="/booking"
+              className="block w-full text-center border border-purple-300 text-purple-900 py-2.5 rounded-full font-medium hover:bg-purple-100/50 transition-colors"
+            >
+              Book a counseling session
+            </Link>
+          </div>
+        )}
+
         <div className="bg-brand-primary/10 rounded-2xl p-5 text-left flex items-center justify-between">
           <div>
             <p className="text-brand-primary text-sm font-medium">Today's check-in</p>
             <p className="font-display text-xl font-semibold">{bandCopy.label}</p>
+            <p className="text-brand-ink/60 text-xs mt-1">{bandCopy.explanation}</p>
           </div>
           <span className="text-2xl">📈</span>
+        </div>
+
+        <div className="bg-brand-surface rounded-2xl shadow-sm p-5 text-left space-y-4">
+          {Object.entries(result.sections || {}).map(([key, section]) => {
+            const percent = Math.round((section.score / SECTION_MAX_SCORE) * 100);
+            return (
+              <div key={key}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-sm font-medium">{SECTION_LABELS[key] || key}</p>
+                  <p className="text-xs text-brand-ink/50 tabular-nums">{percent}%</p>
+                </div>
+                <div className="h-2 bg-brand-ink/10 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-brand-primary rounded-full transition-all duration-500"
+                    style={{ width: `${percent}%` }}
+                  />
+                </div>
+                <p className="text-xs text-brand-ink/50 mt-1.5">{BAND_COPY[section.band]?.explanation}</p>
+              </div>
+            );
+          })}
         </div>
 
         <div className="space-y-2">

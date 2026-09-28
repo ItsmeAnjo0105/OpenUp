@@ -945,6 +945,85 @@ app.post('/admin/psychologists/:id/reject', requireAuth, requireRole('admin'), a
   res.json({ rejected: true });
 });
 
+// GET /admin/users?search=&role=&status= — the account roster behind Manage
+// Users: search by name/email, filter by role/status. Password is never selected.
+app.get('/admin/users', requireAuth, requireRole('admin'), async (req, res) => {
+  const { search, role, status } = req.query;
+
+  let query = supabase
+    .from('User')
+    .select('user_id, name, email, role, barangay_id, status, created_at')
+    .order('created_at', { ascending: false });
+
+  if (role) query = query.eq('role', role);
+  if (status) query = query.eq('status', status);
+  if (search) query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
+
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// PATCH /admin/users/:id/status — general activate/suspend, distinct from the
+// psychologist-application-only status change above. An admin can't act on
+// their own account through this route (avoids accidentally locking themselves out).
+app.patch('/admin/users/:id/status', requireAuth, requireRole('admin'), async (req, res) => {
+  const { status } = req.body;
+  if (!['active', 'suspended'].includes(status)) {
+    return res.status(400).json({ error: "status must be 'active' or 'suspended'" });
+  }
+  if (Number(req.params.id) === req.user.user_id) {
+    return res.status(400).json({ error: 'You cannot change the status of your own account' });
+  }
+
+  const { data, error } = await supabase
+    .from('User')
+    .update({ status })
+    .eq('user_id', req.params.id)
+    .select('user_id, name, email, role, status');
+
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data || data.length === 0) return res.status(404).json({ error: 'User not found' });
+  res.json(data[0]);
+});
+
+// DELETE /admin/users/:id — permanent hard delete via delete_user_account (see
+// db/delete_user_account.sql): wipes every row referencing this account, in one
+// transaction. Voice journal audio files are removed from storage first
+// (best-effort -- the DB delete already succeeded either way, so a storage
+// cleanup failure shouldn't block the response).
+app.delete('/admin/users/:id', requireAuth, requireRole('admin'), async (req, res) => {
+  const targetId = Number(req.params.id);
+  if (targetId === req.user.user_id) {
+    return res.status(400).json({ error: 'You cannot delete your own account' });
+  }
+
+  const { data: journalEntries } = await supabase
+    .from('Voice_Journal')
+    .select('audio_path')
+    .eq('user_id', targetId);
+
+  if (journalEntries && journalEntries.length > 0) {
+    const paths = journalEntries.map((j) => j.audio_path).filter(Boolean);
+    if (paths.length > 0) {
+      try {
+        await supabase.storage.from('voice-journal-audio').remove(paths);
+      } catch {
+        // best-effort cleanup -- the account delete proceeds regardless
+      }
+    }
+  }
+
+  const { data, error } = await supabase.rpc('delete_user_account', { p_user_id: targetId });
+
+  if (error) {
+    if (error.message?.includes('not found')) return res.status(404).json({ error: 'User not found' });
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json({ deleted: true, ...data[0] });
+});
+
 // GET /admin/bookings?status=pending|confirmed|all (default: all except cancelled/declined)
 app.get('/admin/bookings', requireAuth, requireRole('admin'), async (req, res) => {
   const status = req.query.status;
@@ -1855,6 +1934,13 @@ app.post('/auth/login', async (req, res) => {
 
   if (!passwordMatches) {
     return res.status(401).json({ error: 'Invalid email or password' });
+  }
+
+  if (user.status === 'suspended') {
+    return res.status(403).json({ error: 'This account has been suspended. Contact an administrator.' });
+  }
+  if (user.status === 'rejected') {
+    return res.status(403).json({ error: 'This account is not active.' });
   }
 
   const token = jwt.sign(

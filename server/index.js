@@ -2168,7 +2168,9 @@ app.post('/voice-journal', upload.single('audio'), async (req, res) => {
     // Step 6: a flagged crisis entry actually escalates now instead of just sitting in
     // the DB as a flag nobody acts on — same match-or-queue path the AI Crisis
     // Companion uses. Best-effort: the journal entry is already saved either way, so a
-    // failure here shouldn't fail the whole request.
+    // failure here shouldn't fail the whole request. This escalation happens on every
+    // flagged entry regardless of pattern -- a single crisis-language entry still gets
+    // real help queued immediately, that's a safety behavior, not a UI nag.
     let crisisEscalation = null;
     if (isCrisis) {
       try {
@@ -2178,12 +2180,28 @@ app.post('/voice-journal', upload.single('audio'), async (req, res) => {
       }
     }
 
+    // The intrusive "severe emotional distress" popup, separately, is reserved for a
+    // repeated pattern -- 3+ flagged entries within the last 7 days -- rather than
+    // firing on every single flagged entry.
+    let showCrisisModal = false;
+    if (isCrisis) {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const { count, error: countError } = await supabase
+        .from('Voice_Journal')
+        .select('journal_id', { count: 'exact', head: true })
+        .eq('user_id', user_id)
+        .eq('risk_flag', true)
+        .gte('created_at', sevenDaysAgo);
+      if (!countError) showCrisisModal = (count || 0) >= 3;
+    }
+
     res.status(201).json({
       ...data[0],
       emotional_summary: reflectionBase,
       wellness_suggestion: wellnessSuggestion,
       content_indicators: contentIndicators,
       crisis_escalation: crisisEscalation,
+      show_crisis_modal: showCrisisModal,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

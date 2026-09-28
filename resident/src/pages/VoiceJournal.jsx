@@ -389,54 +389,56 @@ function VoiceJournal() {
           </div>
         )}
 
+        {result?.show_crisis_modal && !dismissed && (
+          <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-6">
+            <div className="bg-purple-50 border border-purple-200 rounded-2xl p-6 max-w-sm w-full">
+              <p className="text-sm text-purple-900 mb-4">
+                We've noticed language suggesting severe emotional distress in several of your recent
+                entries. We recommend connecting with a licensed psychologist who can provide
+                professional support.
+              </p>
+
+              {result.crisis_escalation?.matched ? (
+                <button
+                  onClick={() => navigate(`/session/${result.crisis_escalation.booking.booking_id}`)}
+                  className="block w-full text-center bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors mb-2"
+                >
+                  Join now — a psychologist is ready
+                </button>
+              ) : result.crisis_escalation && !result.crisis_escalation.error ? (
+                <p className="text-sm text-purple-900 mb-2">
+                  No one is free to talk this exact moment, but you've been placed at the top of the
+                  queue and a psychologist will reach out shortly. If you need to talk to someone right
+                  now, please call [YOUR VERIFIED CRISIS HOTLINE NUMBER HERE].
+                </p>
+              ) : crisisStatus === 'queued' ? (
+                <p className="text-sm text-purple-900 mb-2">
+                  No one is free to talk this exact moment, but you've been placed at the top of the
+                  queue and a psychologist will reach out shortly. If you need to talk to someone right
+                  now, please call [YOUR VERIFIED CRISIS HOTLINE NUMBER HERE].
+                </p>
+              ) : (
+                <button
+                  onClick={handleCrisisMatch}
+                  disabled={matching}
+                  className="block w-full text-center bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors mb-2 disabled:opacity-60"
+                >
+                  {matching ? 'Connecting...' : 'Connect with a Licensed Psychologist'}
+                </button>
+              )}
+
+              <button
+                onClick={() => setDismissed(true)}
+                className="w-full text-center border border-brand-primary text-brand-primary py-2.5 rounded-full font-medium hover:bg-brand-primary/5"
+              >
+                Not Now
+              </button>
+            </div>
+          </div>
+        )}
+
         {result && (
           <div className="space-y-4 mb-10">
-            {result.risk_flag && !dismissed && (
-              <div className="bg-purple-50 border border-purple-200 rounded-2xl p-5">
-                <p className="text-sm text-purple-900 mb-4">
-                  We've detected language that may indicate you're experiencing severe emotional
-                  distress. We recommend connecting with a licensed psychologist who can provide
-                  professional support.
-                </p>
-
-                {result.crisis_escalation?.matched ? (
-                  <button
-                    onClick={() => navigate(`/session/${result.crisis_escalation.booking.booking_id}`)}
-                    className="block w-full text-center bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors mb-2"
-                  >
-                    Join now — a psychologist is ready
-                  </button>
-                ) : result.crisis_escalation && !result.crisis_escalation.error ? (
-                  <p className="text-sm text-purple-900 mb-2">
-                    No one is free to talk this exact moment, but you've been placed at the top of the
-                    queue and a psychologist will reach out shortly. If you need to talk to someone right
-                    now, please call [YOUR VERIFIED CRISIS HOTLINE NUMBER HERE].
-                  </p>
-                ) : crisisStatus === 'queued' ? (
-                  <p className="text-sm text-purple-900 mb-2">
-                    No one is free to talk this exact moment, but you've been placed at the top of the
-                    queue and a psychologist will reach out shortly. If you need to talk to someone right
-                    now, please call [YOUR VERIFIED CRISIS HOTLINE NUMBER HERE].
-                  </p>
-                ) : (
-                  <button
-                    onClick={handleCrisisMatch}
-                    disabled={matching}
-                    className="block w-full text-center bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors mb-2 disabled:opacity-60"
-                  >
-                    {matching ? 'Connecting...' : 'Connect with a Licensed Psychologist'}
-                  </button>
-                )}
-
-                <button
-                  onClick={() => setDismissed(true)}
-                  className="w-full text-center border border-brand-primary text-brand-primary py-2.5 rounded-full font-medium hover:bg-brand-primary/5"
-                >
-                  Not Now
-                </button>
-              </div>
-            )}
-
             <p className="text-xs uppercase tracking-wide text-brand-ink/40 font-medium">
               Your recording · {new Date(result.created_at).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
             </p>

@@ -1300,6 +1300,9 @@ app.get('/psychologists/me/dashboard-summary', requireAuth, requireRole('psychol
             improving: Math.round((improving / classifiedCount) * 100),
             stable: Math.round((stable / classifiedCount) * 100),
             needs_attention: Math.round((needsAttention / classifiedCount) * 100),
+            improving_count: improving,
+            stable_count: stable,
+            needs_attention_count: needsAttention,
           }
         : null,
     todays_sessions_detail: todaysSessions.map((b) => ({

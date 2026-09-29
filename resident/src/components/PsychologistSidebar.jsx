@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { API_URL, authHeader } from '../config';
 
 const items = [
   { label: 'Dashboard', path: '/psychologist/dashboard', icon: '🏠', color: 'bg-emerald-400/20' },
@@ -10,6 +11,7 @@ const items = [
   { label: 'Notes', path: '/psychologist/notes', icon: '📝', color: 'bg-amber-400/20' },
   { label: 'Schedule', path: '/psychologist/schedule', icon: '📅', color: 'bg-cyan-400/20' },
   { label: 'Reports', path: '/psychologist/reports', icon: '📊', color: 'bg-lime-400/20' },
+  { label: 'Notifications', path: '/notifications', icon: '🔔', color: 'bg-yellow-400/20' },
   { label: 'Profile', path: '/psychologist/profile', icon: '👤', color: 'bg-fuchsia-400/20' },
 ];
 
@@ -17,6 +19,16 @@ function PsychologistSidebar({ user, sidebarOpen, setSidebarOpen }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('openup_sidebar_collapsed') === 'true');
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    fetch(`${API_URL}/notifications`, { headers: authHeader() })
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) setUnreadCount(data.filter((n) => !n.read).length);
+      })
+      .catch(() => {});
+  }, []);
 
   const toggleCollapsed = () => {
     setCollapsed((prev) => {
@@ -101,6 +113,15 @@ function PsychologistSidebar({ user, sidebarOpen, setSidebarOpen }) {
                 {item.icon}
               </span>
               {!collapsed && <span className="flex-1 leading-tight truncate">{item.label}</span>}
+              {item.path === '/notifications' && unreadCount > 0 && (
+                collapsed ? (
+                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-400" />
+                ) : (
+                  <span className="text-[11px] font-semibold min-w-4.5 h-4.5 px-1 rounded-full flex items-center justify-center bg-red-500 text-white">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )
+              )}
             </Link>
           );
         })}

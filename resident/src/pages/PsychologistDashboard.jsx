@@ -1,9 +1,15 @@
 import { useEffect, useState } from 'react';
-import { BarChart, Bar, XAxis, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { Link, useNavigate } from 'react-router-dom';
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import {
+  IconCalendarEvent, IconFileText, IconCircleCheck, IconWallet,
+  IconBell, IconChevronDown, IconChevronRight, IconLogout, IconUserCircle, IconLeaf,
+} from '@tabler/icons-react';
 import PsychologistLayout from '../components/PsychologistLayout';
 import { API_URL, authHeader, getStoredUser } from '../config';
 
 const MOOD_COLORS = { improving: '#2F5D50', stable: '#E8A33D', needs_attention: '#D9534F' };
+const MOOD_LABELS = { improving: 'Improving', stable: 'Stable', needs_attention: 'Declining' };
 
 // Never shows a resident's real name here -- same masking principle as Anonymous
 // Chat, applied to this at-a-glance session list too.
@@ -14,57 +20,156 @@ function anonymizeResidentId(residentId) {
 function PsychologistDashboard() {
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState('');
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [now, setNow] = useState(new Date());
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const user = getStoredUser();
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetch(`${API_URL}/psychologists/me/dashboard-summary`, { headers: authHeader() })
       .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
       .then(({ ok, data }) => (ok ? setSummary(data) : setError(data?.error || 'Could not load dashboard.')))
       .catch(() => setError('Could not load dashboard.'));
+
+    fetch(`${API_URL}/notifications`, { headers: authHeader() })
+      .then((res) => res.json())
+      .then((data) => { if (Array.isArray(data)) setUnreadCount(data.filter((n) => !n.read).length); })
+      .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    const interval = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem('openup_token');
+    localStorage.removeItem('openup_user');
+    navigate('/');
+  };
+
   const moodData = summary?.mood_distribution
-    ? [
-        { key: 'improving', label: 'Improving', value: summary.mood_distribution.improving },
-        { key: 'stable', label: 'Stable', value: summary.mood_distribution.stable },
-        { key: 'needs_attention', label: 'Needs attention', value: summary.mood_distribution.needs_attention },
-      ].filter((d) => d.value > 0)
+    ? ['improving', 'stable', 'needs_attention'].map((key) => ({
+        key,
+        label: MOOD_LABELS[key],
+        percent: summary.mood_distribution[key],
+        count: summary.mood_distribution[`${key}_count`],
+      }))
     : [];
+  const dominantMood = moodData.length > 0
+    ? moodData.reduce((best, d) => (d.percent > best.percent ? d : best), moodData[0])
+    : null;
+  const chartMoodData = moodData.filter((d) => d.percent > 0);
 
   return (
     <PsychologistLayout>
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-1">
         <div>
           <h1 className="font-display text-2xl font-semibold">Welcome, {user.name} 🌿</h1>
-          <p className="text-brand-ink/60 text-sm">Your practice at a glance.</p>
+          <p className="text-brand-ink/60 text-sm">Here's what's happening with your practice today.</p>
+        </div>
+
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="text-right text-xs text-brand-ink/50 hidden sm:block">
+            <p className="flex items-center gap-1 justify-end">
+              <IconCalendarEvent size={13} />
+              {now.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </p>
+            <p>{now.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })}</p>
+          </div>
+
+          <Link to="/notifications" className="relative w-9 h-9 rounded-full bg-brand-surface shadow-sm flex items-center justify-center text-brand-ink/60 hover:text-brand-ink">
+            <IconBell size={17} />
+            {unreadCount > 0 && (
+              <span className="absolute top-1 right-1.5 w-2 h-2 rounded-full bg-red-500" />
+            )}
+          </Link>
+
+          <div className="relative">
+            <button
+              onClick={() => setAccountMenuOpen((v) => !v)}
+              className="flex items-center gap-1.5 bg-brand-surface shadow-sm rounded-full pl-1.5 pr-2.5 py-1.5"
+            >
+              <span className="w-6 h-6 rounded-full bg-brand-primary text-white flex items-center justify-center text-[10px] font-semibold">
+                {(user.name || '?').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()}
+              </span>
+              <span className="text-xs font-medium text-brand-ink/80 hidden sm:inline">{user.name}</span>
+              <IconChevronDown size={13} className="text-brand-ink/40" />
+            </button>
+            {accountMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setAccountMenuOpen(false)} />
+                <div className="absolute right-0 mt-1 w-40 bg-brand-surface rounded-xl shadow-md py-1 z-20" style={{ border: '1px solid rgba(28,36,32,0.08)' }}>
+                  <Link
+                    to="/psychologist/profile"
+                    onClick={() => setAccountMenuOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 text-sm text-brand-ink/70 hover:bg-brand-ink/5"
+                  >
+                    <IconUserCircle size={15} /> Profile
+                  </Link>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                  >
+                    <IconLogout size={15} /> Log out
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
-      {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
+      {error && <p className="text-sm text-red-600 mb-4 mt-4">{error}</p>}
 
       {summary && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <StatCard icon="📅" value={summary.today_sessions} label="Today's sessions" />
-            <StatCard icon="📥" value={summary.pending_requests} label="Pending requests" />
-            <StatCard icon="✅" value={summary.completed_sessions} label="Completed sessions" />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 mt-6">
             <StatCard
-              icon="💰"
+              icon={<IconCalendarEvent size={18} />}
+              iconBg="bg-sky-100 text-sky-700"
+              value={summary.today_sessions}
+              label="Today's sessions"
+              caption={summary.today_sessions === 0 ? 'No sessions today' : `${summary.today_sessions} scheduled today`}
+              to="/psychologist/schedule"
+            />
+            <StatCard
+              icon={<IconFileText size={18} />}
+              iconBg="bg-violet-100 text-violet-700"
+              value={summary.pending_requests}
+              label="Pending requests"
+              caption={summary.pending_requests > 0 ? 'Needs your attention' : 'All caught up'}
+              to="/psychologist/requests"
+            />
+            <StatCard
+              icon={<IconCircleCheck size={18} />}
+              iconBg="bg-green-100 text-green-700"
+              value={summary.completed_sessions}
+              label="Completed sessions"
+              caption="All-time total"
+              to="/psychologist/reports"
+            />
+            <StatCard
+              icon={<IconWallet size={18} />}
+              iconBg="bg-amber-100 text-amber-700"
               value={`₱${summary.monthly_earnings_paid.toLocaleString()}`}
-              label={
-                summary.monthly_earnings_pending > 0
-                  ? `Paid this month (+₱${summary.monthly_earnings_pending.toLocaleString()} pending)`
-                  : 'Paid this month'
-              }
+              label="Paid this month"
+              caption={summary.monthly_earnings_pending > 0 ? `+₱${summary.monthly_earnings_pending.toLocaleString()} pending` : 'No pending payments'}
+              to="/psychologist/reports"
             />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
             <div className="bg-brand-surface rounded-2xl shadow-sm p-6">
-              <h2 className="font-display text-base font-semibold mb-4">Appointments per month</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-display text-base font-semibold">Appointments per month</h2>
+                <span className="text-xs text-brand-ink/40">Last 7 months</span>
+              </div>
               <ResponsiveContainer width="100%" height={180}>
                 <BarChart data={summary.appointments_per_month}>
                   <XAxis dataKey="month" axisLine={false} tickLine={false} fontSize={12} />
+                  <YAxis axisLine={false} tickLine={false} fontSize={11} width={24} allowDecimals={false} />
                   <Bar dataKey="count" fill="#2F5D50" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -72,26 +177,35 @@ function PsychologistDashboard() {
 
             <div className="bg-brand-surface rounded-2xl shadow-sm p-6">
               <h2 className="font-display text-base font-semibold mb-4">Mood distribution (clients)</h2>
-              {moodData.length === 0 ? (
+              {chartMoodData.length === 0 ? (
                 <p className="text-sm text-brand-ink/50">
                   Not enough mood check-in history from your clients yet.
                 </p>
               ) : (
                 <div className="flex items-center gap-6">
-                  <ResponsiveContainer width={140} height={140}>
-                    <PieChart>
-                      <Pie data={moodData} dataKey="value" innerRadius={40} outerRadius={65} paddingAngle={2}>
-                        {moodData.map((d) => (
-                          <Cell key={d.key} fill={MOOD_COLORS[d.key]} />
-                        ))}
-                      </Pie>
-                    </PieChart>
-                  </ResponsiveContainer>
+                  <div className="relative shrink-0">
+                    <ResponsiveContainer width={140} height={140}>
+                      <PieChart>
+                        <Pie data={chartMoodData} dataKey="percent" innerRadius={40} outerRadius={65} paddingAngle={2}>
+                          {chartMoodData.map((d) => (
+                            <Cell key={d.key} fill={MOOD_COLORS[d.key]} />
+                          ))}
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                    {dominantMood && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                        <p className="text-lg font-semibold leading-none">{dominantMood.percent}%</p>
+                        <p className="text-[10px] text-brand-ink/50 mt-0.5">{dominantMood.label}</p>
+                      </div>
+                    )}
+                  </div>
                   <div className="space-y-2">
                     {moodData.map((d) => (
                       <div key={d.key} className="flex items-center gap-2 text-sm">
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: MOOD_COLORS[d.key] }} />
-                        <span className="text-brand-ink/70">{d.label} {d.value}%</span>
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: MOOD_COLORS[d.key] }} />
+                        <span className="text-brand-ink/70">{d.label}</span>
+                        <span className="text-brand-ink/40 text-xs">{d.percent}% · {d.count}</span>
                       </div>
                     ))}
                   </div>
@@ -100,8 +214,19 @@ function PsychologistDashboard() {
             </div>
           </div>
 
-          <div className="bg-brand-surface rounded-2xl shadow-sm p-6">
-            <h2 className="font-display text-base font-semibold mb-4">Today's sessions</h2>
+          <div id="todays-sessions" className="bg-brand-surface rounded-2xl shadow-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-display text-base font-semibold flex items-center gap-2">
+                <IconLeaf size={16} className="text-brand-primary" /> Today's sessions
+              </h2>
+              <Link
+                to="/psychologist/schedule"
+                className="flex items-center gap-1 text-xs font-medium px-3.5 py-2 rounded-full text-white"
+                style={{ backgroundColor: '#2b4d3f' }}
+              >
+                <IconCalendarEvent size={14} /> View calendar <IconChevronRight size={13} />
+              </Link>
+            </div>
             {summary.todays_sessions_detail.length === 0 ? (
               <p className="text-sm text-brand-ink/50">No sessions scheduled for today.</p>
             ) : (
@@ -144,13 +269,17 @@ function PsychologistDashboard() {
   );
 }
 
-function StatCard({ icon, value, label }) {
+function StatCard({ icon, iconBg, value, label, caption, to }) {
   return (
-    <div className="bg-brand-surface rounded-2xl shadow-sm p-5">
-      <span className="text-xl">{icon}</span>
-      <p className="text-2xl font-semibold mt-2">{value}</p>
-      <p className="text-xs text-brand-ink/50 mt-0.5">{label}</p>
-    </div>
+    <Link to={to} className="bg-brand-surface rounded-2xl shadow-sm p-5 block hover:shadow-md transition-shadow">
+      <div className="flex items-start justify-between">
+        <span className={`w-9 h-9 rounded-full flex items-center justify-center ${iconBg}`}>{icon}</span>
+        <IconChevronRight size={15} className="text-brand-ink/30 mt-1" />
+      </div>
+      <p className="text-xs text-brand-ink/50 mt-3">{label}</p>
+      <p className="text-2xl font-semibold mt-0.5">{value}</p>
+      {caption && <p className="text-[11px] text-brand-ink/40 mt-0.5">{caption}</p>}
+    </Link>
   );
 }
 

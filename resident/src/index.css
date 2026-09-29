@@ -55,3 +55,84 @@ body {
 .sidebar-scroll:hover::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.3);
 }
+
+/* Interaction layer: hover lift + scale + soft shadow, with a quick press-down
+   on click. Kept purely additive (no layout/color/text changes) -- applied
+   via these utility classes rather than touching each component's own styles. */
+.interactive {
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 200ms ease;
+  will-change: transform;
+}
+.interactive:hover {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 10px 24px rgba(28, 36, 32, 0.12);
+}
+.interactive:active {
+  transform: translateY(0) scale(0.98);
+  transition-duration: 90ms;
+}
+
+/* Cards: a gentler lift (less scale) since they're bigger surfaces than buttons. */
+.interactive-card {
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 200ms ease;
+  will-change: transform;
+}
+.interactive-card:hover {
+  transform: translateY(-3px) scale(1.01);
+  box-shadow: 0 12px 28px rgba(28, 36, 32, 0.1);
+}
+.interactive-card:active {
+  transform: translateY(-1px) scale(0.995);
+  transition-duration: 90ms;
+}
+
+/* Accept/Decline: the same lift, plus a soft tinted glow on hover. */
+.interactive-accept:hover {
+  box-shadow: 0 10px 24px rgba(47, 93, 80, 0.35);
+}
+.interactive-decline:hover {
+  box-shadow: 0 10px 24px rgba(217, 83, 79, 0.25);
+}
+
+/* Sidebar nav items: a smooth highlight + slight horizontal shift instead of
+   a lift, since they sit in a tight vertical list. */
+.interactive-nav {
+  transition: transform 180ms ease, background-color 180ms ease;
+}
+.interactive-nav:hover {
+  transform: translateX(3px);
+}
+.interactive-nav:active {
+  transform: translateX(1px) scale(0.98);
+  transition-duration: 90ms;
+}
+
+/* Visible keyboard focus ring, app-wide, additive only (doesn't fire on mouse
+   clicks thanks to :focus-visible). */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .interactive,
+  .interactive-card,
+  .interactive-nav {
+    transition: none !important;
+  }
+  .interactive:hover,
+  .interactive:active,
+  .interactive-card:hover,
+  .interactive-card:active,
+  .interactive-nav:hover,
+  .interactive-nav:active {
+    transform: none !important;
+    box-shadow: none !important;
+  }
+}

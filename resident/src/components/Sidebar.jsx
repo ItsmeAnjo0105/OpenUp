@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { API_URL, authHeader } from '../config';
+import { playHover, playClick } from '../utils/sound';
 
 const modules = [
   { label: 'Dashboard', path: '/dashboard', icon: '🏠', color: 'bg-emerald-400/20', enabled: true },
@@ -98,8 +99,9 @@ function Sidebar({ sidebarOpen, setSidebarOpen }) {
           )}
         </Link>
         <button
-          onClick={toggleCollapsed}
-          className="hidden md:flex text-white/40 hover:text-white/80 text-sm mt-1 shrink-0"
+          onClick={() => { playClick(); toggleCollapsed(); }}
+          onMouseEnter={playHover}
+          className="interactive hidden md:flex text-white/40 hover:text-white/80 text-sm mt-1 shrink-0"
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           {collapsed ? '»' : '«'}
@@ -125,7 +127,9 @@ function Sidebar({ sidebarOpen, setSidebarOpen }) {
               key={m.path}
               to={m.path}
               title={collapsed ? m.label : undefined}
-              className={`flex items-center gap-3 px-2.5 py-2 rounded-xl text-sm font-medium transition-colors relative ${
+              onMouseEnter={playHover}
+              onClick={playClick}
+              className={`interactive-nav flex items-center gap-3 px-2.5 py-2 rounded-xl text-sm font-medium transition-colors relative ${
                 collapsed ? 'justify-center' : ''
               } ${
                 isActive
@@ -199,8 +203,9 @@ function Sidebar({ sidebarOpen, setSidebarOpen }) {
           )
         )}
         <button
-          onClick={handleLogout}
-          className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-sm font-medium text-white/70 hover:bg-white/5 hover:text-white transition-colors ${
+          onClick={() => { playClick(); handleLogout(); }}
+          onMouseEnter={playHover}
+          className={`interactive-nav w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-sm font-medium text-white/70 hover:bg-white/5 hover:text-white transition-colors ${
             collapsed ? 'justify-center' : ''
           }`}
           title={collapsed ? 'Log out' : undefined}

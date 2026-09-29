@@ -4,6 +4,7 @@ import PsychologistLayout from '../components/PsychologistLayout';
 import PsychologistTopBar from '../components/PsychologistTopBar';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { API_URL, authHeader } from '../config';
+import { playHover, playClick } from '../utils/sound';
 
 const AVATAR_COLORS = [
   { badge: 'bg-emerald-100 text-emerald-700', border: '#10b981' },
@@ -110,21 +111,24 @@ function PsychologistRequests() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <button
-                      onClick={() => act(r.booking_id, 'accept')}
-                      className="flex items-center gap-1 text-xs font-medium px-3.5 py-2 rounded-full text-white"
+                      onClick={() => { playClick(); act(r.booking_id, 'accept'); }}
+                      onMouseEnter={playHover}
+                      className="interactive interactive-accept flex items-center gap-1 text-xs font-medium px-3.5 py-2 rounded-full text-white"
                       style={{ backgroundColor: '#2b4d3f' }}
                     >
                       <IconCheck size={14} /> Accept
                     </button>
                     <button
-                      onClick={() => confirmDecline(r)}
-                      className="flex items-center gap-1 text-xs font-medium px-3.5 py-2 rounded-full border border-red-300 text-red-600"
+                      onClick={() => { playClick(); confirmDecline(r); }}
+                      onMouseEnter={playHover}
+                      className="interactive interactive-decline flex items-center gap-1 text-xs font-medium px-3.5 py-2 rounded-full border border-red-300 text-red-600"
                     >
                       <IconX size={14} /> Decline
                     </button>
                     <button
-                      onClick={() => setExpandedId(isExpanded ? null : r.booking_id)}
-                      className="text-brand-ink/40 hover:text-brand-ink/70 p-1"
+                      onClick={() => { playClick(); setExpandedId(isExpanded ? null : r.booking_id); }}
+                      onMouseEnter={playHover}
+                      className="interactive text-brand-ink/40 hover:text-brand-ink/70 p-1"
                     >
                       <IconChevronRight size={16} className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
                     </button>

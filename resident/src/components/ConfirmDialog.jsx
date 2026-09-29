@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { playHover, playClick } from '../utils/sound';
 
 // Generic confirmation modal. Pages hold one { title, message, confirmLabel,
 // destructive, onConfirm } object in state (null when closed) and pass it in --
@@ -10,6 +11,7 @@ function ConfirmDialog({ dialog, onClose }) {
   if (!dialog) return null;
 
   const handleConfirm = async () => {
+    playClick();
     setLoading(true);
     try {
       await dialog.onConfirm();
@@ -32,17 +34,19 @@ function ConfirmDialog({ dialog, onClose }) {
         <p className="text-sm text-brand-ink/60 mb-6">{dialog.message}</p>
         <div className="flex gap-2">
           <button
-            onClick={onClose}
+            onClick={() => { playClick(); onClose(); }}
+            onMouseEnter={playHover}
             disabled={loading}
-            className="flex-1 text-sm font-medium py-2.5 rounded-full border border-brand-ink/20 disabled:opacity-60"
+            className="interactive flex-1 text-sm font-medium py-2.5 rounded-full border border-brand-ink/20 disabled:opacity-60"
           >
             {dialog.cancelLabel || 'Cancel'}
           </button>
           <button
             onClick={handleConfirm}
+            onMouseEnter={playHover}
             disabled={loading}
-            className={`flex-1 text-sm font-medium py-2.5 rounded-full text-white disabled:opacity-60 ${
-              dialog.destructive === false ? 'bg-brand-primary' : 'bg-red-600'
+            className={`interactive flex-1 text-sm font-medium py-2.5 rounded-full text-white disabled:opacity-60 ${
+              dialog.destructive === false ? 'bg-brand-primary interactive-accept' : 'bg-red-600 interactive-decline'
             }`}
           >
             {loading ? 'Please wait...' : dialog.confirmLabel || 'Confirm'}

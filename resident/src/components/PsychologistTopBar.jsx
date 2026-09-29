@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { IconCalendarEvent, IconBell, IconChevronDown, IconLogout, IconUserCircle } from '@tabler/icons-react';
 import { API_URL, authHeader, getStoredUser } from '../config';
+import { playHover, playClick } from '../utils/sound';
 
 // The bell + account dropdown shared across every psychologist page's header;
 // the clock is Dashboard-only (showClock), since other pages' mockups don't
@@ -44,7 +45,12 @@ function PsychologistTopBar({ showClock = false }) {
         </div>
       )}
 
-      <Link to="/notifications" className="relative w-9 h-9 rounded-full bg-brand-surface shadow-sm flex items-center justify-center text-brand-ink/60 hover:text-brand-ink">
+      <Link
+        to="/notifications"
+        onMouseEnter={playHover}
+        onClick={playClick}
+        className="interactive relative w-9 h-9 rounded-full bg-brand-surface shadow-sm flex items-center justify-center text-brand-ink/60 hover:text-brand-ink"
+      >
         <IconBell size={17} />
         {unreadCount > 0 && (
           <span className="absolute top-1 right-1.5 w-2 h-2 rounded-full bg-red-500" />
@@ -53,8 +59,9 @@ function PsychologistTopBar({ showClock = false }) {
 
       <div className="relative">
         <button
-          onClick={() => setAccountMenuOpen((v) => !v)}
-          className="flex items-center gap-1.5 bg-brand-surface shadow-sm rounded-full pl-1.5 pr-2.5 py-1.5"
+          onClick={() => { playClick(); setAccountMenuOpen((v) => !v); }}
+          onMouseEnter={playHover}
+          className="interactive flex items-center gap-1.5 bg-brand-surface shadow-sm rounded-full pl-1.5 pr-2.5 py-1.5"
         >
           <span className="w-6 h-6 rounded-full bg-brand-primary text-white flex items-center justify-center text-[10px] font-semibold">
             {(user?.name || '?').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()}
@@ -68,14 +75,16 @@ function PsychologistTopBar({ showClock = false }) {
             <div className="absolute right-0 mt-1 w-40 bg-brand-surface rounded-xl shadow-md py-1 z-20" style={{ border: '1px solid rgba(28,36,32,0.08)' }}>
               <Link
                 to="/psychologist/profile"
-                onClick={() => setAccountMenuOpen(false)}
-                className="flex items-center gap-2 px-3 py-2 text-sm text-brand-ink/70 hover:bg-brand-ink/5"
+                onMouseEnter={playHover}
+                onClick={() => { playClick(); setAccountMenuOpen(false); }}
+                className="interactive-nav flex items-center gap-2 px-3 py-2 text-sm text-brand-ink/70 hover:bg-brand-ink/5"
               >
                 <IconUserCircle size={15} /> Profile
               </Link>
               <button
-                onClick={handleLogout}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                onClick={() => { playClick(); handleLogout(); }}
+                onMouseEnter={playHover}
+                className="interactive-nav w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
               >
                 <IconLogout size={15} /> Log out
               </button>

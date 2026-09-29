@@ -5,6 +5,7 @@ import { IconCalendarEvent, IconFileText, IconCircleCheck, IconWallet, IconChevr
 import PsychologistLayout from '../components/PsychologistLayout';
 import PsychologistTopBar from '../components/PsychologistTopBar';
 import { API_URL, authHeader, getStoredUser } from '../config';
+import { playHover, playClick } from '../utils/sound';
 
 const MOOD_COLORS = { improving: '#2F5D50', stable: '#E8A33D', needs_attention: '#D9534F' };
 const MOOD_LABELS = { improving: 'Improving', stable: 'Stable', needs_attention: 'Declining' };
@@ -151,7 +152,9 @@ function PsychologistDashboard() {
               </h2>
               <Link
                 to="/psychologist/schedule"
-                className="flex items-center gap-1 text-xs font-medium px-3.5 py-2 rounded-full text-white"
+                onMouseEnter={playHover}
+                onClick={playClick}
+                className="interactive flex items-center gap-1 text-xs font-medium px-3.5 py-2 rounded-full text-white"
                 style={{ backgroundColor: '#2b4d3f' }}
               >
                 <IconCalendarEvent size={14} /> View calendar <IconChevronRight size={13} />
@@ -201,7 +204,12 @@ function PsychologistDashboard() {
 
 function StatCard({ icon, iconBg, value, label, caption, to }) {
   return (
-    <Link to={to} className="bg-brand-surface rounded-2xl shadow-sm p-5 block hover:shadow-md transition-shadow">
+    <Link
+      to={to}
+      onMouseEnter={playHover}
+      onClick={playClick}
+      className="interactive-card bg-brand-surface rounded-2xl shadow-sm p-5 block"
+    >
       <div className="flex items-start justify-between">
         <span className={`w-9 h-9 rounded-full flex items-center justify-center ${iconBg}`}>{icon}</span>
         <IconChevronRight size={15} className="text-brand-ink/30 mt-1" />

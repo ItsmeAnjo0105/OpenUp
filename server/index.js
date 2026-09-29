@@ -925,7 +925,30 @@ app.get('/psychologists/me/clients/:residentId/wellness', requireAuth, requireRo
     .order('schedule', { ascending: false });
   if (sessionsError) return res.status(500).json({ error: sessionsError.message });
 
-  res.json({ mood_entries: moodEntries, assessments, sessions });
+  const { data: residentUser, error: residentError } = await supabase
+    .from('User')
+    .select('user_id, name')
+    .eq('user_id', residentId)
+    .single();
+  if (residentError || !residentUser) return res.status(404).json({ error: 'Resident not found' });
+
+  const now = new Date();
+  const hasUpcoming = sessions.some(
+    (s) => new Date(s.schedule) >= now && s.status !== 'cancelled' && s.status !== 'declined'
+  );
+
+  res.json({
+    client: {
+      user_id: residentUser.user_id,
+      name: residentUser.name,
+      total_sessions: sessions.length,
+      last_session: sessions[0]?.schedule || null,
+      is_active: hasUpcoming,
+    },
+    mood_entries: moodEntries,
+    assessments,
+    sessions,
+  });
 });
 
 // GET /admin/psychologists?status=pending|verified|all (default: pending)

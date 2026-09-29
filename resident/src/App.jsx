@@ -15,6 +15,7 @@ import PsychologistDashboard from './pages/PsychologistDashboard';
 import PsychologistRequests from './pages/PsychologistRequests';
 import PsychologistChats from './pages/PsychologistChats';
 import PsychologistClients from './pages/PsychologistClients';
+import PsychologistClientDetail from './pages/PsychologistClientDetail';
 import PsychologistGroupSessions from './pages/PsychologistGroupSessions';
 import PsychologistNotes from './pages/PsychologistNotes';
 import PsychologistSchedule from './pages/PsychologistSchedule';
@@ -47,6 +48,7 @@ function App() {
       <Route path="/psychologist/requests" element={<PsychologistRequests />} />
       <Route path="/psychologist/chats" element={<PsychologistChats />} />
       <Route path="/psychologist/clients" element={<PsychologistClients />} />
+      <Route path="/psychologist/clients/:residentId" element={<PsychologistClientDetail />} />
       <Route path="/psychologist/group-sessions" element={<PsychologistGroupSessions />} />
       <Route path="/psychologist/notes" element={<PsychologistNotes />} />
       <Route path="/psychologist/schedule" element={<PsychologistSchedule />} />

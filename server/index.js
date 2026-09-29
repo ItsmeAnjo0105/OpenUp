@@ -829,11 +829,13 @@ app.get('/psychologists/:id/availability', async (req, res) => {
 // had a booking together that wasn't cancelled/declined -- matches the same
 // "qualifying booking" filter used for slot-taken checks above.
 async function getClientResidentIds(psychologistId) {
+  // "Client" means the psychologist has actually accepted a request from them --
+  // a still-pending request (or one that was cancelled/declined) doesn't count yet.
   const { data, error } = await supabase
     .from('Booking')
     .select('resident_id')
     .eq('psychologist_id', psychologistId)
-    .not('status', 'in', '(cancelled,declined)');
+    .eq('status', 'confirmed');
   if (error) return { error };
   return { ids: [...new Set((data || []).map((b) => b.resident_id))] };
 }

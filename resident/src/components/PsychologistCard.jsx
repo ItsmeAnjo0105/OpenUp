@@ -82,6 +82,11 @@ function PsychologistCard({ psychologist, onBook }) {
           </p>
         </div>
 
+        {/* Pins the price/duration footer, bio, and button to the bottom of the
+            card regardless of how much variable content (tags, years, bio) sits
+            above -- otherwise cards in the same row misalign when one has less. */}
+        <div className="flex-1" />
+
         <div className="flex items-center justify-between mt-3 pt-3" style={{ borderTop: '1px solid rgba(28,36,32,0.08)' }}>
           <span className="flex items-center gap-1 text-xs text-brand-ink/50">
             <IconClock size={13} /> 1 hour/session

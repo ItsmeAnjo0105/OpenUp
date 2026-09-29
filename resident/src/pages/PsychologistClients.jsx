@@ -221,7 +221,7 @@ function PsychologistClients() {
       ) : visibleClients.length === 0 ? (
         <p className="text-brand-ink/50 text-sm">No clients match this search or filter.</p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="flex flex-col gap-3">
           {visibleClients.map((c) => {
             const color = colorForName(c.name);
             return (
@@ -229,7 +229,7 @@ function PsychologistClients() {
                 key={c.user_id}
                 onClick={() => { playClick(); openClient(c); }}
                 onMouseEnter={playHover}
-                className="interactive-card bg-brand-surface rounded-2xl shadow-sm p-5 flex items-center gap-3 text-left"
+                className="interactive-card bg-brand-surface rounded-2xl shadow-sm p-5 flex items-center gap-3 text-left border-l-4 border-transparent hover:border-brand-primary hover:bg-brand-primary/5 transition-colors"
               >
                 <span className={`w-11 h-11 rounded-full ${color.bg} ${color.text} font-semibold flex items-center justify-center shrink-0`}>
                   {(c.name || '?')[0]?.toUpperCase()}

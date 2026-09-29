@@ -1,13 +1,25 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { IconArrowLeft, IconSearch, IconCalendarEvent, IconChevronRight, IconUsersGroup, IconMoodSad, IconMoodEmpty, IconCloudRain, IconHeartHandshake, IconUsers } from '@tabler/icons-react';
 import Layout from '../components/Layout';
 import PsychologistCard from '../components/PsychologistCard';
 import BookingCalendar from '../components/BookingCalendar';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { API_URL } from '../config';
 
+const CATEGORIES = [
+  { label: 'All', icon: IconUsersGroup },
+  { label: 'Anxiety', icon: IconMoodEmpty },
+  { label: 'Stress', icon: IconCloudRain },
+  { label: 'Depression', icon: IconMoodSad },
+  { label: 'Self-Esteem', icon: IconHeartHandshake },
+  { label: 'Relationships', icon: IconUsers },
+];
+
 function BookCounseling() {
   const [psychologists, setPsychologists] = useState([]);
+  const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('All');
   const [selected, setSelected] = useState(null);
   const [schedule, setSchedule] = useState('');
   const [status, setStatus] = useState('');
@@ -27,6 +39,12 @@ function BookCounseling() {
       .then(setPsychologists)
       .catch(() => {});
   }, []);
+
+  const filteredPsychologists = psychologists.filter((p) => {
+    if (category !== 'All' && !(p.specialties || []).includes(category)) return false;
+    if (search && !(p.User?.name || '').toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
 
   const loadBookings = () => {
     fetch(`${API_URL}/bookings/user/${user.user_id}`)
@@ -153,23 +171,64 @@ function BookCounseling() {
 
   return (
     <Layout>
-      <div className="max-w-2xl mx-auto">
-        <div className="flex items-start justify-between gap-4 mb-1">
-          <h1 className="font-display text-2xl font-semibold">Book Counseling</h1>
-          <button
-            onClick={openSessionsModal}
-            className="text-xs font-medium px-3 py-1.5 rounded-full border border-brand-ink/20 whitespace-nowrap"
-          >
-            View Scheduled Sessions
-          </button>
+      <div className="max-w-5xl mx-auto">
+        <Link to="/dashboard" className="inline-flex items-center gap-1 text-xs font-medium text-brand-ink/50 hover:text-brand-ink/70 mb-3">
+          <IconArrowLeft size={13} /> Book Counseling
+        </Link>
+
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
+          <div>
+            <h1 className="font-display text-2xl sm:text-3xl font-semibold mb-1">Find the right support for your journey</h1>
+            <p className="text-brand-ink/60 text-sm">
+              Connect with licensed psychologists and take the next step towards better mental health.
+            </p>
+          </div>
+          <div className="flex flex-col items-stretch sm:items-end gap-2 shrink-0">
+            <div className="relative">
+              <IconSearch size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-ink/40" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search psychologist"
+                className="border border-brand-ink/15 rounded-full pl-9 pr-4 py-2 text-sm w-full sm:w-56 bg-brand-surface"
+              />
+            </div>
+            <button
+              onClick={openSessionsModal}
+              className="flex items-center justify-center gap-1.5 text-xs font-medium px-3.5 py-2 rounded-full border border-brand-ink/20 whitespace-nowrap bg-brand-surface"
+            >
+              <IconCalendarEvent size={14} /> View Scheduled Sessions <IconChevronRight size={13} />
+            </button>
+          </div>
         </div>
-        <p className="text-brand-ink/60 text-sm mb-8">Pick a psychologist and a time that works for you.</p>
+
+        <div className="flex flex-wrap gap-2 mb-6">
+          {CATEGORIES.map((c) => {
+            const Icon = c.icon;
+            const isActive = category === c.label;
+            return (
+              <button
+                key={c.label}
+                onClick={() => setCategory(c.label)}
+                className={`flex items-center gap-1.5 text-xs font-medium px-3.5 py-2 rounded-full border transition-colors ${
+                  isActive
+                    ? 'bg-brand-primary text-white border-brand-primary'
+                    : 'border-brand-ink/15 text-brand-ink/70 hover:bg-brand-ink/5'
+                }`}
+              >
+                <Icon size={14} /> {c.label}
+              </button>
+            );
+          })}
+        </div>
 
         {psychologists.length === 0 ? (
           <p className="text-brand-ink/50 text-sm">No verified psychologists available yet.</p>
+        ) : filteredPsychologists.length === 0 ? (
+          <p className="text-brand-ink/50 text-sm">No psychologists match this search or category.</p>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            {psychologists.map((p) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredPsychologists.map((p) => (
               <PsychologistCard key={p.psychologist_id} psychologist={p} onBook={openBookingModal} />
             ))}
           </div>

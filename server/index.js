@@ -254,7 +254,7 @@ app.get('/payments/:id/sync', requireAuth, async (req, res) => {
 app.get('/psychologists', async (req, res) => {
   const { data, error } = await supabase
     .from('Psychologist')
-    .select('psychologist_id, license_no, is_verified, credentials, specialties, rating, session_price, profile_photo_url, User(name)')
+    .select('psychologist_id, license_no, is_verified, credentials, specialties, rating, session_price, profile_photo_url, years_experience, bio, User(name)')
     .eq('is_verified', true);
 
   if (error) return res.status(500).json({ error: error.message });
@@ -509,12 +509,13 @@ app.get('/psychologists/me', requireAuth, requireRole('psychologist'), async (re
 // is_verified, and is_available stay controlled by signup/admin verification and are
 // deliberately not accepted here.
 app.patch('/psychologists/me', requireAuth, requireRole('psychologist'), async (req, res) => {
-  const { specialties, years_experience, languages, availability, session_price } = req.body;
+  const { specialties, years_experience, languages, availability, session_price, bio } = req.body;
 
   const updates = {};
   if (specialties !== undefined) updates.specialties = specialties;
   if (languages !== undefined) updates.languages = languages;
   if (availability !== undefined) updates.availability = availability;
+  if (bio !== undefined) updates.bio = bio === '' ? null : bio;
 
   if (years_experience !== undefined) {
     updates.years_experience = years_experience === '' || years_experience === null ? null : Number(years_experience);

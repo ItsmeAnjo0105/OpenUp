@@ -1,4 +1,4 @@
-import { IconUser, IconStar } from '@tabler/icons-react';
+import { IconUser, IconStar, IconCircleCheck, IconMapPin, IconHeadphones, IconClock, IconCalendarEvent, IconArrowRight } from '@tabler/icons-react';
 
 const MAX_VISIBLE_TAGS = 3;
 
@@ -13,31 +13,44 @@ function PsychologistCard({ psychologist, onBook }) {
       className="bg-brand-surface rounded-2xl overflow-hidden flex flex-col"
       style={{ border: '1.5px solid rgba(28,36,32,0.12)' }}
     >
-      <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
-        {psychologist.profile_photo_url ? (
-          <img
-            src={psychologist.profile_photo_url}
-            alt={name}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div
-            className="w-full h-full flex items-center justify-center"
-            style={{ background: 'linear-gradient(135deg, #5DCAA5 0%, #2b4d3f 100%)' }}
-          >
-            <IconUser size={40} color="white" stroke={1.5} />
-          </div>
+      <div className="p-4 pb-0 flex items-start justify-between">
+        {psychologist.is_verified && (
+          <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+            <IconCircleCheck size={12} stroke={2} /> Verified
+          </span>
         )}
       </div>
 
-      <div className="p-3 flex flex-col flex-1">
+      <div className="flex justify-center pt-2">
+        <div className="w-20 h-20 rounded-full overflow-hidden shrink-0">
+          {psychologist.profile_photo_url ? (
+            <img src={psychologist.profile_photo_url} alt={name} className="w-full h-full object-cover" />
+          ) : (
+            <div
+              className="w-full h-full flex items-center justify-center"
+              style={{ background: 'linear-gradient(135deg, #5DCAA5 0%, #2b4d3f 100%)' }}
+            >
+              <IconUser size={32} color="white" stroke={1.5} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="p-4 pt-3 flex flex-col flex-1 text-center">
         <p className="text-sm font-semibold text-brand-ink truncate">{name}</p>
         {psychologist.credentials && (
-          <p className="text-xs text-brand-ink/50 truncate mb-2">{psychologist.credentials}</p>
+          <p className="text-xs text-brand-ink/50 truncate">{psychologist.credentials}</p>
+        )}
+
+        {psychologist.rating != null && (
+          <span className="flex items-center justify-center gap-1 text-xs font-medium text-brand-ink/70 mt-1">
+            <IconStar size={13} fill="#E8A33D" color="#E8A33D" />
+            {Number(psychologist.rating).toFixed(1)}
+          </span>
         )}
 
         {visibleTags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mb-2">
+          <div className="flex flex-wrap justify-center gap-1 mt-2">
             {visibleTags.map((tag) => (
               <span
                 key={tag}
@@ -55,26 +68,39 @@ function PsychologistCard({ psychologist, onBook }) {
           </div>
         )}
 
-        <div className="flex items-center justify-between mb-3 mt-auto">
-          {psychologist.rating != null ? (
-            <span className="flex items-center gap-1 text-xs font-medium text-brand-ink/70">
-              <IconStar size={13} fill="#E8A33D" color="#E8A33D" />
-              {Number(psychologist.rating).toFixed(1)}
-            </span>
-          ) : (
-            <span />
+        <div className="text-left mt-3 space-y-1.5">
+          {psychologist.years_experience != null && (
+            <p className="flex items-center gap-1.5 text-xs text-brand-ink/60">
+              <IconUser size={13} className="shrink-0" /> {psychologist.years_experience}+ years experience
+            </p>
           )}
-          <span className="text-xs font-semibold text-brand-ink">
-            ₱{Number(psychologist.session_price).toLocaleString()}/session
+          <p className="flex items-center gap-1.5 text-xs text-brand-ink/60">
+            <IconMapPin size={13} className="shrink-0" /> Cebu City
+          </p>
+          <p className="flex items-center gap-1.5 text-xs text-brand-ink/60">
+            <IconHeadphones size={13} className="shrink-0" /> Online audio session
+          </p>
+        </div>
+
+        <div className="flex items-center justify-between mt-3 pt-3" style={{ borderTop: '1px solid rgba(28,36,32,0.08)' }}>
+          <span className="flex items-center gap-1 text-xs text-brand-ink/50">
+            <IconClock size={13} /> 1 hour/session
+          </span>
+          <span className="text-sm font-semibold text-brand-ink">
+            ₱{Number(psychologist.session_price).toLocaleString()}
           </span>
         </div>
 
+        {psychologist.bio && (
+          <p className="text-xs text-brand-ink/60 mt-3 text-left line-clamp-3">{psychologist.bio}</p>
+        )}
+
         <button
           onClick={() => onBook(psychologist)}
-          className="w-full text-sm font-medium py-2 rounded-full border transition-colors"
-          style={{ borderColor: '#2b4d3f', color: '#2b4d3f' }}
+          className="w-full flex items-center justify-center gap-1.5 text-sm font-medium py-2.5 rounded-full text-white mt-4 transition-opacity hover:opacity-90"
+          style={{ backgroundColor: '#2b4d3f' }}
         >
-          Book an appointment
+          <IconCalendarEvent size={15} /> Book an appointment <IconArrowRight size={15} />
         </button>
       </div>
     </div>

@@ -34,6 +34,7 @@ function PsychologistProfile() {
           languages: (data.languages || []).join(', '),
           availability: data.availability || '',
           session_price: data.session_price ?? '',
+          bio: data.bio || '',
         });
       })
       .catch(() => setError('Could not load your profile.'));
@@ -55,6 +56,7 @@ function PsychologistProfile() {
           languages: form.languages.split(',').map((s) => s.trim()).filter(Boolean),
           availability: form.availability,
           session_price: form.session_price,
+          bio: form.bio,
         }),
       });
       const data = await res.json();
@@ -112,6 +114,16 @@ function PsychologistProfile() {
 
           {editing ? (
             <form onSubmit={save} className="grid grid-cols-2 gap-4">
+              <Field label="Bio (shown on your public card)" className="col-span-2">
+                <textarea
+                  value={form.bio}
+                  onChange={(e) => setForm({ ...form, bio: e.target.value })}
+                  rows={3}
+                  maxLength={280}
+                  placeholder="A sentence or two introducing yourself to residents..."
+                  className="w-full border border-brand-ink/15 rounded-lg px-3 py-2 text-sm resize-none"
+                />
+              </Field>
               <Field label="Specialization (comma-separated)">
                 <input
                   value={form.specialties}
@@ -170,6 +182,9 @@ function PsychologistProfile() {
             </form>
           ) : (
             <div className="grid grid-cols-2 gap-4">
+              <Field label="Bio (shown on your public card)" className="col-span-2">
+                <p className="text-sm">{profile.bio || '—'}</p>
+              </Field>
               <Field label="Specialization">
                 <p className="text-sm">{profile.specialties?.length ? profile.specialties.join(', ') : '—'}</p>
               </Field>
@@ -202,9 +217,9 @@ function PsychologistProfile() {
   );
 }
 
-function Field({ label, children }) {
+function Field({ label, children, className }) {
   return (
-    <div>
+    <div className={className}>
       <p className="text-xs text-brand-ink/50 mb-1">{label}</p>
       {children}
     </div>

@@ -900,7 +900,17 @@ app.get('/psychologists/me/clients/:residentId/wellness', requireAuth, requireRo
     .limit(20);
   if (assessmentError) return res.status(500).json({ error: assessmentError.message });
 
-  res.json({ mood_entries: moodEntries, assessments });
+  // Session history: this client's bookings specifically with this
+  // psychologist -- the "View Session History" half of Client Management.
+  const { data: sessions, error: sessionsError } = await supabase
+    .from('Booking')
+    .select('booking_id, schedule, status')
+    .eq('resident_id', residentId)
+    .eq('psychologist_id', psychologistId)
+    .order('schedule', { ascending: false });
+  if (sessionsError) return res.status(500).json({ error: sessionsError.message });
+
+  res.json({ mood_entries: moodEntries, assessments, sessions });
 });
 
 // GET /admin/psychologists?status=pending|verified|all (default: pending)

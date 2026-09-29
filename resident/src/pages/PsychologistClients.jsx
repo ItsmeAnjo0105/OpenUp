@@ -10,6 +10,13 @@ const BAND_STYLE = {
 
 const BAND_LABEL = { low: 'Feeling steady', moderate: 'Some strain showing', elevated: 'Carrying a lot' };
 
+const STATUS_STYLE = {
+  pending: 'bg-yellow-100 text-yellow-700',
+  confirmed: 'bg-blue-100 text-blue-700',
+  cancelled: 'bg-brand-ink/5 text-brand-ink/50',
+  declined: 'bg-brand-ink/5 text-brand-ink/50',
+};
+
 function initials(name) {
   return (name || '?').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
 }
@@ -20,6 +27,9 @@ function PsychologistClients() {
   const [selected, setSelected] = useState(null);
   const [wellness, setWellness] = useState(null);
   const [wellnessError, setWellnessError] = useState('');
+  const [expandedSessionId, setExpandedSessionId] = useState(null);
+  const [noteDrafts, setNoteDrafts] = useState({});
+  const [noteStatus, setNoteStatus] = useState({});
 
   useEffect(() => {
     fetch(`${API_URL}/psychologists/me/clients`, { headers: authHeader() })
@@ -32,6 +42,7 @@ function PsychologistClients() {
     setSelected(client);
     setWellness(null);
     setWellnessError('');
+    setExpandedSessionId(null);
     fetch(`${API_URL}/psychologists/me/clients/${client.user_id}/wellness`, { headers: authHeader() })
       .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
       .then(({ ok, data }) => {
@@ -41,12 +52,39 @@ function PsychologistClients() {
       .catch(() => setWellnessError('Could not reach the server.'));
   };
 
+  const toggleSessionNotes = (bookingId) => {
+    if (expandedSessionId === bookingId) {
+      setExpandedSessionId(null);
+      return;
+    }
+    setExpandedSessionId(bookingId);
+    if (noteDrafts[bookingId] !== undefined) return; // already loaded
+    fetch(`${API_URL}/bookings/${bookingId}/notes`, { headers: authHeader() })
+      .then((res) => res.json())
+      .then((data) => setNoteDrafts((prev) => ({ ...prev, [bookingId]: data?.body || '' })))
+      .catch(() => setNoteDrafts((prev) => ({ ...prev, [bookingId]: '' })));
+  };
+
+  const saveSessionNotes = async (bookingId) => {
+    setNoteStatus((prev) => ({ ...prev, [bookingId]: 'saving' }));
+    try {
+      const res = await fetch(`${API_URL}/bookings/${bookingId}/notes`, {
+        method: 'PUT',
+        headers: { ...authHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: noteDrafts[bookingId] || '' }),
+      });
+      setNoteStatus((prev) => ({ ...prev, [bookingId]: res.ok ? 'saved' : 'error' }));
+    } catch {
+      setNoteStatus((prev) => ({ ...prev, [bookingId]: 'error' }));
+    }
+  };
+
   return (
     <PsychologistLayout>
       <h1 className="font-display text-2xl font-semibold mb-1">My Clients</h1>
       <p className="text-brand-ink/60 text-sm mb-8">
         Residents you've had a booking with. Open one to review their mood and wellness check-in
-        history before a session.
+        history, session history, and add private progress notes.
       </p>
 
       {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
@@ -141,6 +179,58 @@ function PsychologistClients() {
                           </div>
                         </div>
                       ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-brand-ink/40 font-medium mb-2">Session history</p>
+                  {!wellness.sessions || wellness.sessions.length === 0 ? (
+                    <p className="text-sm text-brand-ink/40">No sessions yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {wellness.sessions.map((s) => {
+                        const isOpen = expandedSessionId === s.booking_id;
+                        const status = noteStatus[s.booking_id];
+                        return (
+                          <div key={s.booking_id} className="border border-brand-ink/10 rounded-xl overflow-hidden">
+                            <button
+                              onClick={() => toggleSessionNotes(s.booking_id)}
+                              className="w-full flex items-center justify-between p-3 text-left"
+                            >
+                              <span className="text-sm">
+                                {new Date(s.schedule).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}
+                              </span>
+                              <span className={`text-xs font-medium px-2.5 py-1 rounded-full capitalize ${STATUS_STYLE[s.status] || 'bg-brand-ink/5 text-brand-ink/50'}`}>
+                                {s.status}
+                              </span>
+                            </button>
+                            {isOpen && (
+                              <div className="px-3 pb-3">
+                                <p className="text-[11px] text-brand-ink/40 mb-1.5">Private progress notes -- your client can never see these.</p>
+                                <textarea
+                                  value={noteDrafts[s.booking_id] ?? ''}
+                                  onChange={(e) => setNoteDrafts((prev) => ({ ...prev, [s.booking_id]: e.target.value }))}
+                                  rows={3}
+                                  placeholder="Add progress notes for this session..."
+                                  className="w-full border border-brand-ink/15 rounded-lg px-3 py-2 text-sm resize-none"
+                                />
+                                <div className="flex items-center gap-2 mt-2">
+                                  <button
+                                    onClick={() => saveSessionNotes(s.booking_id)}
+                                    disabled={status === 'saving'}
+                                    className="text-xs font-medium px-3 py-1.5 rounded-full bg-brand-primary text-white disabled:opacity-60"
+                                  >
+                                    {status === 'saving' ? 'Saving...' : 'Save notes'}
+                                  </button>
+                                  {status === 'saved' && <span className="text-xs text-brand-ink/50">Saved.</span>}
+                                  {status === 'error' && <span className="text-xs text-red-600">Could not save.</span>}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

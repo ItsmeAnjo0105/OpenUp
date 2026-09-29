@@ -548,6 +548,14 @@ async function getOwnPsychologistId(userId) {
   return data?.psychologist_id || null;
 }
 
+// Same masking scheme the Dashboard's frontend already uses for its
+// today's-sessions table -- kept here too for the Reports endpoint, which is
+// a bulk/exportable view rather than a specific-client lookup (My Clients
+// already shows real names for that).
+function anonymizeResidentId(residentId) {
+  return `Anonymous #${1000 + Number(residentId)}`;
+}
+
 app.get('/psychologists/me/availability', requireAuth, requireRole('psychologist'), async (req, res) => {
   const psychologistId = await getOwnPsychologistId(req.user.user_id);
   if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
@@ -1327,6 +1335,82 @@ app.get('/psychologists/me/dashboard-summary', requireAuth, requireRole('psychol
       resident_id: b.resident_id,
       schedule: b.schedule,
     })),
+  });
+});
+
+// GET /psychologists/me/reports — Session/Earnings reports for the Reports page:
+// last 12 months of earnings (paid vs pending) and every session in that window,
+// with the resident anonymized (same masking as the Dashboard's today's-sessions
+// table) since this is a bulk/exportable view, not a specific-client lookup --
+// that's what My Clients is for.
+app.get('/psychologists/me/reports', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const now = new Date();
+  const windowStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1));
+
+  const { data: bookings, error: bookingsError } = await supabase
+    .from('Booking')
+    .select('booking_id, resident_id, schedule, status')
+    .eq('psychologist_id', psychologistId)
+    .gte('schedule', windowStart.toISOString())
+    .order('schedule', { ascending: false });
+  if (bookingsError) return res.status(500).json({ error: bookingsError.message });
+
+  const bookingIds = bookings.map((b) => b.booking_id);
+  let payments = [];
+  if (bookingIds.length > 0) {
+    const { data, error: paymentsError } = await supabase
+      .from('Payment')
+      .select('booking_id, psychologist_payout, status')
+      .in('booking_id', bookingIds);
+    if (paymentsError) return res.status(500).json({ error: paymentsError.message });
+    payments = data;
+  }
+  const paymentByBooking = Object.fromEntries(payments.map((p) => [p.booking_id, p]));
+
+  const monthKeys = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    monthKeys.push({ key: d.toISOString().slice(0, 7), label: d.toLocaleString('default', { month: 'short', year: '2-digit', timeZone: 'UTC' }) });
+  }
+  const earningsByMonth = Object.fromEntries(monthKeys.map((m) => [m.key, { paid: 0, pending: 0 }]));
+
+  let totalPaid = 0;
+  let totalPending = 0;
+  let completedCount = 0;
+
+  const sessions = bookings.map((b) => {
+    const payment = paymentByBooking[b.booking_id] || null;
+    const monthKey = b.schedule.slice(0, 7);
+    if (payment && monthKey in earningsByMonth) {
+      if (payment.status === 'paid') earningsByMonth[monthKey].paid += Number(payment.psychologist_payout);
+      else if (payment.status === 'pending') earningsByMonth[monthKey].pending += Number(payment.psychologist_payout);
+    }
+    if (payment?.status === 'paid') totalPaid += Number(payment.psychologist_payout);
+    if (payment?.status === 'pending') totalPending += Number(payment.psychologist_payout);
+    if (b.status === 'confirmed' && new Date(b.schedule) < now) completedCount += 1;
+
+    return {
+      booking_id: b.booking_id,
+      client: anonymizeResidentId(b.resident_id),
+      schedule: b.schedule,
+      status: b.status,
+      payout: payment ? Number(payment.psychologist_payout) : null,
+      payment_status: payment?.status || null,
+    };
+  });
+
+  res.json({
+    sessions,
+    earnings_by_month: monthKeys.map((m) => ({ month: m.label, ...earningsByMonth[m.key] })),
+    totals: {
+      total_sessions: bookings.length,
+      completed_sessions: completedCount,
+      total_paid: totalPaid,
+      total_pending: totalPending,
+    },
   });
 });
 

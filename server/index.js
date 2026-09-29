@@ -1234,6 +1234,56 @@ app.get('/psychologists/me/bookings', requireAuth, requireRole('psychologist'), 
   res.json(data);
 });
 
+// GET /psychologists/me/chats — Anonymous Chats inbox: one row per confirmed
+// booking, with its most recent message (if any) for the list preview, so the
+// list doesn't need to fetch every conversation's full thread just to render.
+app.get('/psychologists/me/chats', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { data: psychologist, error: psychError } = await supabase
+    .from('Psychologist')
+    .select('psychologist_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  if (psychError || !psychologist) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data: bookings, error: bookingsError } = await supabase
+    .from('Booking')
+    .select('booking_id, resident_id, schedule')
+    .eq('psychologist_id', psychologist.psychologist_id)
+    .eq('status', 'confirmed')
+    .order('schedule', { ascending: false });
+  if (bookingsError) return res.status(500).json({ error: bookingsError.message });
+  if (bookings.length === 0) return res.json([]);
+
+  const { data: messages, error: messagesError } = await supabase
+    .from('Message')
+    .select('booking_id, body, sender_role, created_at')
+    .in('booking_id', bookings.map((b) => b.booking_id))
+    .order('created_at', { ascending: false });
+  if (messagesError) return res.status(500).json({ error: messagesError.message });
+
+  // First hit per booking_id wins the most recent message, since `messages` is
+  // already sorted newest-first.
+  const lastMessageByBooking = new Map();
+  messages.forEach((m) => {
+    if (!lastMessageByBooking.has(m.booking_id)) lastMessageByBooking.set(m.booking_id, m);
+  });
+
+  res.json(bookings.map((b) => {
+    const last = lastMessageByBooking.get(b.booking_id);
+    return {
+      booking_id: b.booking_id,
+      resident_id: b.resident_id,
+      schedule: b.schedule,
+      last_message: last?.body || null,
+      last_message_at: last?.created_at || null,
+      // A real, non-fabricated stand-in for "unread": the resident sent the
+      // most recent message and this psychologist hasn't replied since.
+      awaiting_reply: last?.sender_role === 'resident',
+    };
+  }));
+});
+
 // GET /psychologists/me/dashboard-summary — stats + charts for the Dashboard home page.
 app.get('/psychologists/me/dashboard-summary', requireAuth, requireRole('psychologist'), async (req, res) => {
   const { data: psychologist, error: psychError } = await supabase

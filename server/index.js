@@ -855,14 +855,21 @@ app.get('/psychologists/me/clients', requireAuth, requireRole('psychologist'), a
     .in('user_id', residentIds);
   if (usersError) return res.status(500).json({ error: usersError.message });
 
+  const now = new Date();
   const clients = users.map((u) => {
     const theirBookings = bookings.filter((b) => b.resident_id === u.user_id);
+    // "Active" means they have a real upcoming session -- not just any
+    // history -- so it reflects who actually needs attention right now.
+    const hasUpcoming = theirBookings.some(
+      (b) => new Date(b.schedule) >= now && b.status !== 'cancelled' && b.status !== 'declined'
+    );
     return {
       user_id: u.user_id,
       name: u.name,
       email: u.email,
       total_sessions: theirBookings.length,
       last_session: theirBookings[0]?.schedule || null,
+      is_active: hasUpcoming,
     };
   });
 

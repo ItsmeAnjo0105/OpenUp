@@ -2181,6 +2181,66 @@ app.post('/admin/budgets/:barangayId/fund', requireAuth, requireRole('admin'), a
   res.status(201).json(data);
 });
 
+// GET /admin/accomplishment-report — per-barangay activity summary: residents,
+// counseling sessions, care credits, and budget. Wired to the Admin role for now
+// since there's no separate LGU account type yet (same gap as Resource & Budget
+// Management) -- "Generate Barangay Report (Own)" is simulated here by picking
+// one barangay from the full list rather than a real per-LGU login scope.
+app.get('/admin/accomplishment-report', requireAuth, requireRole('admin'), async (req, res) => {
+  const { data: barangays, error: bError } = await supabase.from('Barangay').select('barangay_id, name, city');
+  if (bError) return res.status(500).json({ error: bError.message });
+
+  const { data: residents, error: residentsError } = await supabase
+    .from('User')
+    .select('user_id, barangay_id')
+    .eq('role', 'resident');
+  if (residentsError) return res.status(500).json({ error: residentsError.message });
+
+  const { data: bookings, error: bookingsError } = await supabase
+    .from('Booking')
+    .select('status, User(barangay_id)');
+  if (bookingsError) return res.status(500).json({ error: bookingsError.message });
+
+  const { data: credits, error: creditsError } = await supabase
+    .from('Care_Credit')
+    .select('barangay_id, amount, status');
+  if (creditsError) return res.status(500).json({ error: creditsError.message });
+
+  const { data: budgets, error: budgetError } = await supabase.from('Budget').select('*');
+  if (budgetError) return res.status(500).json({ error: budgetError.message });
+
+  const budgetByBarangay = Object.fromEntries(budgets.map((b) => [b.barangay_id, b]));
+
+  res.json(barangays.map((barangay) => {
+    const residentCount = residents.filter((u) => u.barangay_id === barangay.barangay_id).length;
+
+    const barangayBookings = bookings.filter((b) => b.User?.barangay_id === barangay.barangay_id);
+    const confirmedSessions = barangayBookings.filter((b) => b.status === 'confirmed').length;
+
+    const barangayCredits = credits.filter((c) => c.barangay_id === barangay.barangay_id);
+    const creditsIssued = barangayCredits.reduce((sum, c) => sum + Number(c.amount), 0);
+    const creditsUsed = barangayCredits.filter((c) => c.status === 'used').reduce((sum, c) => sum + Number(c.amount), 0);
+
+    const budget = budgetByBarangay[barangay.barangay_id];
+    const budgetFunded = budget ? Number(budget.total_funded) : 0;
+    const budgetSpent = budget ? Number(budget.total_spent) : 0;
+
+    return {
+      barangay_id: barangay.barangay_id,
+      name: barangay.name,
+      city: barangay.city,
+      resident_count: residentCount,
+      session_count: barangayBookings.length,
+      confirmed_session_count: confirmedSessions,
+      care_credits_issued: creditsIssued,
+      care_credits_used: creditsUsed,
+      budget_funded: budgetFunded,
+      budget_spent: budgetSpent,
+      budget_remaining: budgetFunded - budgetSpent,
+    };
+  }));
+});
+
 // GET /jitsi-token/:bookingId?name=Joan&role=resident
 app.get('/jitsi-token/:bookingId', (req, res) => {
   const { bookingId } = req.params;

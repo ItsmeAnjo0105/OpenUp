@@ -3,6 +3,29 @@ import { useNavigate } from 'react-router-dom';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { API_URL, authHeader, getStoredUser } from '../config';
 
+// Real client-side CSV download built from the fetched report rows, same
+// pattern as the Psychologist Reports export -- no server round trip needed.
+function downloadAccomplishmentCsv(rows) {
+  const header = ['Barangay', 'City', 'Residents', 'Sessions Requested', 'Sessions Confirmed', 'Care Credits Issued (PHP)', 'Care Credits Used (PHP)', 'Budget Funded (PHP)', 'Budget Spent (PHP)', 'Budget Remaining (PHP)'];
+  const csvRows = rows.map((r) => [
+    r.name, r.city, r.resident_count, r.session_count, r.confirmed_session_count,
+    r.care_credits_issued, r.care_credits_used, r.budget_funded, r.budget_spent, r.budget_remaining,
+  ]);
+  const csv = [header, ...csvRows]
+    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `openup-accomplishment-report-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 function AdminDashboard() {
   const [checking, setChecking] = useState(true);
   const [pending, setPending] = useState([]);
@@ -24,6 +47,9 @@ function AdminDashboard() {
   const [userStatusFilter, setUserStatusFilter] = useState('');
   const [escalations, setEscalations] = useState([]);
   const [escalationError, setEscalationError] = useState('');
+  const [accReport, setAccReport] = useState([]);
+  const [accReportError, setAccReportError] = useState('');
+  const [accBarangayId, setAccBarangayId] = useState('');
   const navigate = useNavigate();
   const user = getStoredUser();
 
@@ -72,6 +98,16 @@ function AdminDashboard() {
       .catch(() => {});
   };
 
+  const loadAccomplishmentReport = () => {
+    fetch(`${API_URL}/admin/accomplishment-report`, { headers: authHeader() })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (ok && Array.isArray(data)) setAccReport(data);
+        else setAccReportError(data?.error || 'Could not load the accomplishment report.');
+      })
+      .catch(() => setAccReportError('Could not reach the server.'));
+  };
+
   const loadFinance = () => {
     Promise.all([
       fetch(`${API_URL}/admin/subscriptions`, { headers: authHeader() }).then((res) => res.json().then((data) => ({ ok: res.ok, data }))),
@@ -114,6 +150,7 @@ function AdminDashboard() {
         loadFinance();
         loadUsers();
         loadEscalations();
+        loadAccomplishmentReport();
       })
       .catch(() => {
         localStorage.removeItem('openup_token');
@@ -635,6 +672,83 @@ function AdminDashboard() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-brand-surface rounded-2xl shadow-sm p-6 mt-6">
+          <div className="flex items-center justify-between gap-3 mb-1">
+            <h2 className="font-display text-lg font-semibold">Accomplishment report</h2>
+            <button
+              onClick={() => downloadAccomplishmentCsv(accBarangayId ? accReport.filter((r) => String(r.barangay_id) === accBarangayId) : accReport)}
+              disabled={accReport.length === 0}
+              className="text-xs font-medium px-3.5 py-1.5 rounded-full bg-brand-primary text-white disabled:opacity-40"
+            >
+              Export report
+            </button>
+          </div>
+          <p className="text-xs text-brand-ink/50 mb-4">
+            Residents, sessions, care credits, and budget per barangay. Pick a barangay for its own
+            report, or leave it on "All barangays" for the full picture.
+          </p>
+
+          {accReportError && <p className="text-sm text-red-600 mb-3">{accReportError}</p>}
+
+          <select
+            value={accBarangayId}
+            onChange={(e) => setAccBarangayId(e.target.value)}
+            className="border border-brand-ink/15 rounded-lg px-3 py-1.5 text-sm mb-4"
+          >
+            <option value="">All barangays</option>
+            {accReport.map((r) => (
+              <option key={r.barangay_id} value={r.barangay_id}>{r.name}</option>
+            ))}
+          </select>
+
+          {accReport.length === 0 ? (
+            <p className="text-sm text-brand-ink/50">No barangays found.</p>
+          ) : accBarangayId ? (
+            (() => {
+              const r = accReport.find((row) => String(row.barangay_id) === accBarangayId);
+              if (!r) return null;
+              return (
+                <div className="border border-brand-ink/10 rounded-xl p-4">
+                  <p className="text-sm font-semibold mb-3">{r.name}{r.city ? `, ${r.city}` : ''}</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div><p className="text-xs text-brand-ink/50">Residents</p><p className="text-base font-semibold">{r.resident_count}</p></div>
+                    <div><p className="text-xs text-brand-ink/50">Sessions requested</p><p className="text-base font-semibold">{r.session_count}</p></div>
+                    <div><p className="text-xs text-brand-ink/50">Sessions confirmed</p><p className="text-base font-semibold">{r.confirmed_session_count}</p></div>
+                    <div><p className="text-xs text-brand-ink/50">Care credits issued</p><p className="text-base font-semibold">₱{r.care_credits_issued.toLocaleString()}</p></div>
+                    <div><p className="text-xs text-brand-ink/50">Care credits used</p><p className="text-base font-semibold">₱{r.care_credits_used.toLocaleString()}</p></div>
+                    <div><p className="text-xs text-brand-ink/50">Budget remaining</p><p className="text-base font-semibold">₱{r.budget_remaining.toLocaleString()}</p></div>
+                  </div>
+                </div>
+              );
+            })()
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-brand-ink/50 uppercase">
+                    <th className="pb-2 font-medium">Barangay</th>
+                    <th className="pb-2 font-medium">Residents</th>
+                    <th className="pb-2 font-medium">Sessions</th>
+                    <th className="pb-2 font-medium">Credits used</th>
+                    <th className="pb-2 font-medium">Budget remaining</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {accReport.map((r) => (
+                    <tr key={r.barangay_id} className="border-t border-brand-ink/10">
+                      <td className="py-2.5">{r.name}</td>
+                      <td className="py-2.5 text-brand-ink/60">{r.resident_count}</td>
+                      <td className="py-2.5 text-brand-ink/60">{r.confirmed_session_count}/{r.session_count}</td>
+                      <td className="py-2.5 text-brand-ink/60">₱{r.care_credits_used.toLocaleString()}</td>
+                      <td className="py-2.5 text-brand-ink/60">₱{r.budget_remaining.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>

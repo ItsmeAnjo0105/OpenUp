@@ -19,5 +19,6 @@ export function getStoredUser() {
 export function dashboardPathForRole(role) {
   if (role === 'psychologist') return '/psychologist/dashboard';
   if (role === 'admin') return '/admin/dashboard';
+  if (role === 'lgu') return '/lgu/dashboard';
   return '/dashboard';
 }

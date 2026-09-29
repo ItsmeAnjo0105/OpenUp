@@ -1083,6 +1083,169 @@ app.delete('/admin/users/:id', requireAuth, requireRole('admin'), async (req, re
   res.json({ deleted: true, ...data[0] });
 });
 
+// GET /admin/lgu-accounts — every barangay's LGU login, if it has one. Suspend/
+// reactivate/delete reuse the generic /admin/users/:id routes above -- they
+// already work for any role.
+app.get('/admin/lgu-accounts', requireAuth, requireRole('admin'), async (req, res) => {
+  const { data, error } = await supabase
+    .from('User')
+    .select('user_id, name, email, barangay_id, status, created_at, Barangay(name, city)')
+    .eq('role', 'lgu')
+    .order('created_at', { ascending: false });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// POST /admin/lgu-accounts — provisions a barangay's LGU login. One LGU account
+// per barangay: an admin creates it, hands the credentials to that barangay's
+// office, and they log in as themselves from then on (mirrors real municipal
+// accounts -- no public self-signup for this role).
+app.post('/admin/lgu-accounts', requireAuth, requireRole('admin'), async (req, res) => {
+  const { name, email, password, barangay_id } = req.body;
+  if (!name || !email || !password || !barangay_id) {
+    return res.status(400).json({ error: 'name, email, password, and barangay_id are required' });
+  }
+
+  const { data: barangay, error: barangayError } = await supabase
+    .from('Barangay')
+    .select('barangay_id')
+    .eq('barangay_id', barangay_id)
+    .single();
+  if (barangayError || !barangay) return res.status(404).json({ error: 'Barangay not found' });
+
+  const { data: existingForBarangay } = await supabase
+    .from('User')
+    .select('user_id')
+    .eq('role', 'lgu')
+    .eq('barangay_id', barangay_id)
+    .limit(1);
+  if (existingForBarangay && existingForBarangay.length > 0) {
+    return res.status(409).json({ error: 'This barangay already has an LGU account' });
+  }
+
+  const { data: existingEmail } = await supabase.from('User').select('user_id').eq('email', email).limit(1);
+  if (existingEmail && existingEmail.length > 0) {
+    return res.status(409).json({ error: 'An account with this email already exists' });
+  }
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const { data, error } = await supabase
+    .from('User')
+    .insert([{ name, email, password: hashedPassword, role: 'lgu', barangay_id, status: 'active' }])
+    .select('user_id, name, email, barangay_id, status');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data[0]);
+});
+
+// PATCH /admin/lgu-accounts/:id — name/email only; the account stays tied to
+// whichever barangay it was created for.
+app.patch('/admin/lgu-accounts/:id', requireAuth, requireRole('admin'), async (req, res) => {
+  const { name, email } = req.body;
+  if (!name && !email) return res.status(400).json({ error: 'Nothing to update' });
+
+  const { data: target, error: targetError } = await supabase
+    .from('User')
+    .select('user_id, role')
+    .eq('user_id', req.params.id)
+    .single();
+  if (targetError || !target) return res.status(404).json({ error: 'LGU account not found' });
+  if (target.role !== 'lgu') return res.status(400).json({ error: 'This account is not an LGU account' });
+
+  if (email) {
+    const { data: existingEmail } = await supabase
+      .from('User')
+      .select('user_id')
+      .eq('email', email)
+      .neq('user_id', req.params.id)
+      .limit(1);
+    if (existingEmail && existingEmail.length > 0) {
+      return res.status(409).json({ error: 'An account with this email already exists' });
+    }
+  }
+
+  const updates = {};
+  if (name) updates.name = name;
+  if (email) updates.email = email;
+
+  const { data, error } = await supabase
+    .from('User')
+    .update(updates)
+    .eq('user_id', req.params.id)
+    .select('user_id, name, email, barangay_id, status');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data[0]);
+});
+
+// GET /lgu/me/dashboard — the logged-in LGU account's own barangay at a glance:
+// residents, sessions, care credits, and budget. Always scoped to their own
+// barangay_id (looked up server-side, never taken from a query param), unlike
+// the Admin accomplishment report which can see every barangay.
+app.get('/lgu/me/dashboard', requireAuth, requireRole('lgu'), async (req, res) => {
+  const { data: me, error: meError } = await supabase
+    .from('User')
+    .select('barangay_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+  if (meError || !me) return res.status(404).json({ error: 'Account not found' });
+
+  const { data: barangay, error: barangayError } = await supabase
+    .from('Barangay')
+    .select('barangay_id, name, city')
+    .eq('barangay_id', me.barangay_id)
+    .single();
+  if (barangayError || !barangay) return res.status(404).json({ error: 'Barangay not found' });
+
+  const { count: residentCount, error: residentsError } = await supabase
+    .from('User')
+    .select('user_id', { count: 'exact', head: true })
+    .eq('role', 'resident')
+    .eq('barangay_id', me.barangay_id);
+  if (residentsError) return res.status(500).json({ error: residentsError.message });
+
+  const { data: allBookings, error: bookingsError } = await supabase
+    .from('Booking')
+    .select('status, User(barangay_id)');
+  if (bookingsError) return res.status(500).json({ error: bookingsError.message });
+  const bookings = allBookings.filter((b) => b.User?.barangay_id === me.barangay_id);
+
+  const { data: credits, error: creditsError } = await supabase
+    .from('Care_Credit')
+    .select('amount, status')
+    .eq('barangay_id', me.barangay_id);
+  if (creditsError) return res.status(500).json({ error: creditsError.message });
+
+  const { data: budget } = await supabase
+    .from('Budget')
+    .select('total_funded, total_spent')
+    .eq('barangay_id', me.barangay_id)
+    .maybeSingle();
+
+  const { data: subscription } = await supabase
+    .from('Subscription')
+    .select('status, plan, renewed_at')
+    .eq('barangay_id', me.barangay_id)
+    .maybeSingle();
+
+  const budgetFunded = budget ? Number(budget.total_funded) : 0;
+  const budgetSpent = budget ? Number(budget.total_spent) : 0;
+
+  res.json({
+    barangay,
+    resident_count: residentCount || 0,
+    session_count: bookings.length,
+    confirmed_session_count: bookings.filter((b) => b.status === 'confirmed').length,
+    care_credits_issued: credits.reduce((sum, c) => sum + Number(c.amount), 0),
+    care_credits_used: credits.filter((c) => c.status === 'used').reduce((sum, c) => sum + Number(c.amount), 0),
+    budget_funded: budgetFunded,
+    budget_spent: budgetSpent,
+    budget_remaining: budgetFunded - budgetSpent,
+    subscription_status: subscription?.status || 'inactive',
+  });
+});
+
 // GET /admin/escalations — every emergency flag a psychologist has raised, most
 // recent first, so the Notification sent alongside it has somewhere real to lead.
 app.get('/admin/escalations', requireAuth, requireRole('admin'), async (req, res) => {

@@ -50,6 +50,11 @@ function AdminDashboard() {
   const [accReport, setAccReport] = useState([]);
   const [accReportError, setAccReportError] = useState('');
   const [accBarangayId, setAccBarangayId] = useState('');
+  const [lguAccounts, setLguAccounts] = useState([]);
+  const [lguError, setLguError] = useState('');
+  const [lguForm, setLguForm] = useState({ name: '', email: '', password: '', barangay_id: '' });
+  const [editingLguId, setEditingLguId] = useState(null);
+  const [editLguDraft, setEditLguDraft] = useState({ name: '', email: '' });
   const navigate = useNavigate();
   const user = getStoredUser();
 
@@ -96,6 +101,16 @@ function AdminDashboard() {
         if (ok && Array.isArray(data)) setVerifiedPsychologists(data);
       })
       .catch(() => {});
+  };
+
+  const loadLguAccounts = () => {
+    fetch(`${API_URL}/admin/lgu-accounts`, { headers: authHeader() })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (ok && Array.isArray(data)) setLguAccounts(data);
+        else setLguError(data?.error || 'Could not load LGU accounts.');
+      })
+      .catch(() => setLguError('Could not reach the server.'));
   };
 
   const loadAccomplishmentReport = () => {
@@ -151,6 +166,7 @@ function AdminDashboard() {
         loadUsers();
         loadEscalations();
         loadAccomplishmentReport();
+        loadLguAccounts();
       })
       .catch(() => {
         localStorage.removeItem('openup_token');
@@ -298,6 +314,107 @@ function AdminDashboard() {
     } catch {
       setFinanceError('Could not reach the server.');
     }
+  };
+
+  const createLguAccount = async (e) => {
+    e.preventDefault();
+    setLguError('');
+    try {
+      const res = await fetch(`${API_URL}/admin/lgu-accounts`, {
+        method: 'POST',
+        headers: { ...authHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(lguForm),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setLguError(data.error || 'Could not create the LGU account.');
+        return;
+      }
+      setLguForm({ name: '', email: '', password: '', barangay_id: '' });
+      loadLguAccounts();
+    } catch {
+      setLguError('Could not reach the server.');
+    }
+  };
+
+  const saveLguEdit = async (lguId) => {
+    setLguError('');
+    try {
+      const res = await fetch(`${API_URL}/admin/lgu-accounts/${lguId}`, {
+        method: 'PATCH',
+        headers: { ...authHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(editLguDraft),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setLguError(data.error || 'Could not save changes.');
+        return;
+      }
+      setEditingLguId(null);
+      loadLguAccounts();
+    } catch {
+      setLguError('Could not reach the server.');
+    }
+  };
+
+  const toggleLguStatus = async (targetUser) => {
+    setLguError('');
+    const nextStatus = targetUser.status === 'suspended' ? 'active' : 'suspended';
+    try {
+      const res = await fetch(`${API_URL}/admin/users/${targetUser.user_id}/status`, {
+        method: 'PATCH',
+        headers: { ...authHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setLguError(data.error || 'Something went wrong.');
+        return;
+      }
+      loadLguAccounts();
+    } catch {
+      setLguError('Could not reach the server.');
+    }
+  };
+
+  const deleteLguAccount = async (targetUser) => {
+    setLguError('');
+    try {
+      const res = await fetch(`${API_URL}/admin/users/${targetUser.user_id}`, {
+        method: 'DELETE',
+        headers: authHeader(),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setLguError(data.error || 'Something went wrong.');
+        return;
+      }
+      loadLguAccounts();
+    } catch {
+      setLguError('Could not reach the server.');
+    }
+  };
+
+  const confirmToggleLguStatus = (targetUser) => {
+    const nextStatus = targetUser.status === 'suspended' ? 'active' : 'suspended';
+    setConfirmDialog({
+      title: `Are you sure you want to ${nextStatus === 'suspended' ? 'suspend' : 'reactivate'} this LGU account?`,
+      message: nextStatus === 'suspended'
+        ? `${targetUser.name} will no longer be able to log in.`
+        : `${targetUser.name} will be able to log in again.`,
+      confirmLabel: nextStatus === 'suspended' ? 'Suspend' : 'Reactivate',
+      destructive: nextStatus === 'suspended',
+      onConfirm: () => toggleLguStatus(targetUser),
+    });
+  };
+
+  const confirmDeleteLguAccount = (targetUser) => {
+    setConfirmDialog({
+      title: 'Are you sure you want to delete this LGU account?',
+      message: `This permanently deletes ${targetUser.name}'s login. This cannot be undone.`,
+      confirmLabel: 'Delete permanently',
+      onConfirm: () => deleteLguAccount(targetUser),
+    });
   };
 
   const toggleUserStatus = async (targetUser) => {
@@ -602,6 +719,112 @@ function AdminDashboard() {
                             </option>
                           ))}
                       </select>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-brand-surface rounded-2xl shadow-sm p-6 mt-6">
+          <h2 className="font-display text-lg font-semibold mb-1">Manage LGU accounts</h2>
+          <p className="text-xs text-brand-ink/50 mb-4">
+            One login per barangay. Create the account here and hand the credentials to that
+            barangay's office -- they log in and land on their own dashboard.
+          </p>
+
+          {lguError && <p className="text-sm text-red-600 mb-3">{lguError}</p>}
+
+          <form onSubmit={createLguAccount} className="flex flex-wrap gap-2 mb-4">
+            <input
+              placeholder="Contact name" required
+              value={lguForm.name}
+              onChange={(e) => setLguForm({ ...lguForm, name: e.target.value })}
+              className="border border-brand-ink/15 rounded-lg px-3 py-1.5 text-sm flex-1 min-w-32"
+            />
+            <input
+              type="email" placeholder="Email" required
+              value={lguForm.email}
+              onChange={(e) => setLguForm({ ...lguForm, email: e.target.value })}
+              className="border border-brand-ink/15 rounded-lg px-3 py-1.5 text-sm flex-1 min-w-32"
+            />
+            <input
+              type="password" placeholder="Password" required
+              value={lguForm.password}
+              onChange={(e) => setLguForm({ ...lguForm, password: e.target.value })}
+              className="border border-brand-ink/15 rounded-lg px-3 py-1.5 text-sm w-32"
+            />
+            <select
+              required
+              value={lguForm.barangay_id}
+              onChange={(e) => setLguForm({ ...lguForm, barangay_id: e.target.value })}
+              className="border border-brand-ink/15 rounded-lg px-3 py-1.5 text-sm"
+            >
+              <option value="" disabled>Barangay...</option>
+              {finance
+                .filter((f) => !lguAccounts.some((l) => l.barangay_id === f.barangay_id))
+                .map((f) => (
+                  <option key={f.barangay_id} value={f.barangay_id}>{f.name}</option>
+                ))}
+            </select>
+            <button type="submit" className="text-xs font-medium px-4 py-1.5 rounded-full bg-brand-primary text-white">
+              Create account
+            </button>
+          </form>
+
+          {lguAccounts.length === 0 ? (
+            <p className="text-sm text-brand-ink/50">No LGU accounts yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {lguAccounts.map((l) => (
+                <div key={l.user_id} className="border border-brand-ink/10 rounded-xl p-3 flex items-center justify-between gap-3">
+                  {editingLguId === l.user_id ? (
+                    <div className="flex flex-wrap gap-2 flex-1">
+                      <input
+                        value={editLguDraft.name}
+                        onChange={(e) => setEditLguDraft({ ...editLguDraft, name: e.target.value })}
+                        className="border border-brand-ink/15 rounded-lg px-2 py-1 text-sm flex-1 min-w-24"
+                      />
+                      <input
+                        value={editLguDraft.email}
+                        onChange={(e) => setEditLguDraft({ ...editLguDraft, email: e.target.value })}
+                        className="border border-brand-ink/15 rounded-lg px-2 py-1 text-sm flex-1 min-w-32"
+                      />
+                      <button onClick={() => saveLguEdit(l.user_id)} className="text-xs font-medium text-brand-primary">Save</button>
+                      <button onClick={() => setEditingLguId(null)} className="text-xs text-brand-ink/50">Cancel</button>
+                    </div>
+                  ) : (
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{l.Barangay?.name || `Barangay #${l.barangay_id}`}</p>
+                      <p className="text-xs text-brand-ink/50 truncate">{l.name} · {l.email}</p>
+                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full capitalize mt-1 inline-block ${
+                        l.status === 'suspended' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                      }`}>
+                        {l.status}
+                      </span>
+                    </div>
+                  )}
+                  {editingLguId !== l.user_id && (
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        onClick={() => { setEditingLguId(l.user_id); setEditLguDraft({ name: l.name, email: l.email }); }}
+                        className="text-xs font-medium px-3 py-1.5 rounded-full border border-brand-ink/20"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => confirmToggleLguStatus(l)}
+                        className="text-xs font-medium px-3 py-1.5 rounded-full border border-brand-ink/20"
+                      >
+                        {l.status === 'suspended' ? 'Reactivate' : 'Suspend'}
+                      </button>
+                      <button
+                        onClick={() => confirmDeleteLguAccount(l)}
+                        className="text-xs font-medium px-3 py-1.5 rounded-full border border-red-300 text-red-600"
+                      >
+                        Delete
+                      </button>
                     </div>
                   )}
                 </div>

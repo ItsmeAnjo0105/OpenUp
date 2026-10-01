@@ -4,7 +4,8 @@ import { API_URL, authHeader } from '../config';
 import { playHover, playClick } from '../utils/sound';
 
 const items = [
-  { label: 'Dashboard', path: '/lgu/dashboard', icon: '🏠', color: 'bg-emerald-400/20' },
+  { label: 'LGU Dashboard', path: '/lgu/dashboard', icon: '🏠', color: 'bg-emerald-400/20' },
+  { label: 'Manage Residents', path: '/lgu/residents', icon: '👥', color: 'bg-sky-400/20' },
   { label: 'Notifications', path: '/notifications', icon: '🔔', color: 'bg-yellow-400/20' },
 ];
 

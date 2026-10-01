@@ -23,6 +23,7 @@ import PsychologistReports from './pages/PsychologistReports';
 import PsychologistProfile from './pages/PsychologistProfile';
 import AdminDashboard from './pages/AdminDashboard';
 import LguDashboard from './pages/LguDashboard';
+import LguResidents from './pages/LguResidents';
 import AnonymousChat from './pages/AnonymousChat';
 import PaymentResult from './pages/PaymentResult';
 import Profile from './pages/Profile';
@@ -57,6 +58,7 @@ function App() {
       <Route path="/psychologist/profile" element={<PsychologistProfile />} />
       <Route path="/admin/dashboard" element={<AdminDashboard />} />
       <Route path="/lgu/dashboard" element={<LguDashboard />} />
+      <Route path="/lgu/residents" element={<LguResidents />} />
       <Route path="/anonymous-chat" element={<AnonymousChat />} />
       <Route path="/payment/result" element={<PaymentResult />} />
       <Route path="/profile" element={<Profile />} />

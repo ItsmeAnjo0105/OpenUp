@@ -1179,10 +1179,63 @@ app.patch('/admin/lgu-accounts/:id', requireAuth, requireRole('admin'), async (r
   res.json(data[0]);
 });
 
+// Shared by the LGU's own dashboard and the citywide overview. "Risk" here is
+// a plain, honestly-computed ratio -- NOT a clinical or AI-driven score --
+// based on whether each resident's MOST RECENT Assessment_Result flagged a
+// safety concern. A resident with no assessment at all is simply excluded,
+// never counted as either flagged or clear.
+async function getLatestSafetyFlagByResident() {
+  const { data: assessments, error } = await supabase
+    .from('Assessment_Result')
+    .select('user_id, created_at, safety_flag')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  const latestByUser = new Map();
+  for (const a of assessments) {
+    if (!latestByUser.has(a.user_id)) latestByUser.set(a.user_id, a.safety_flag);
+  }
+  return latestByUser;
+}
+
+// Same idea for mood: each resident's most recent Mood_Entry within the last
+// 30 days, used for the wellness index and "who's actively checking in."
+async function getRecentMoodByResident() {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+
+  const { data: moods, error } = await supabase
+    .from('Mood_Entry')
+    .select('user_id, entry_date, mood_level')
+    .gte('entry_date', cutoff.toISOString().slice(0, 10))
+    .order('entry_date', { ascending: false });
+  if (error) throw error;
+
+  const latestByUser = new Map();
+  for (const m of moods) {
+    if (!latestByUser.has(m.user_id)) latestByUser.set(m.user_id, m.mood_level);
+  }
+  return latestByUser;
+}
+
+// 0 flagged -> Low. Otherwise the flagged share of residents buckets into
+// Mild/Moderate/High/Critical. A barangay with no residents at all gets its
+// own "No data" band rather than being misread as "Low" (safe).
+function riskBandFor(flaggedCount, residentCount) {
+  if (residentCount === 0) return 'no_data';
+  if (flaggedCount === 0) return 'low';
+  const ratio = flaggedCount / residentCount;
+  if (ratio <= 0.1) return 'mild';
+  if (ratio <= 0.25) return 'moderate';
+  if (ratio <= 0.5) return 'high';
+  return 'critical';
+}
+
 // GET /lgu/me/dashboard — the logged-in LGU account's own barangay at a glance:
-// residents, sessions, care credits, and budget. Always scoped to their own
-// barangay_id (looked up server-side, never taken from a query param), unlike
-// the Admin accomplishment report which can see every barangay.
+// residents, sessions, care credits, budget, flagged residents, a wellness
+// index, and weekly engagement. Always scoped to their own barangay_id
+// (looked up server-side, never taken from a query param), unlike the Admin
+// accomplishment report which can see every barangay.
 app.get('/lgu/me/dashboard', requireAuth, requireRole('lgu'), async (req, res) => {
   const { data: me, error: meError } = await supabase
     .from('User')
@@ -1198,22 +1251,23 @@ app.get('/lgu/me/dashboard', requireAuth, requireRole('lgu'), async (req, res) =
     .single();
   if (barangayError || !barangay) return res.status(404).json({ error: 'Barangay not found' });
 
-  const { count: residentCount, error: residentsError } = await supabase
+  const { data: residents, error: residentsError } = await supabase
     .from('User')
-    .select('user_id', { count: 'exact', head: true })
+    .select('user_id')
     .eq('role', 'resident')
     .eq('barangay_id', me.barangay_id);
   if (residentsError) return res.status(500).json({ error: residentsError.message });
+  const residentIds = residents.map((r) => r.user_id);
 
   const { data: allBookings, error: bookingsError } = await supabase
     .from('Booking')
-    .select('status, User(barangay_id)');
+    .select('care_credit_id, created_at, status, User(barangay_id)');
   if (bookingsError) return res.status(500).json({ error: bookingsError.message });
   const bookings = allBookings.filter((b) => b.User?.barangay_id === me.barangay_id);
 
   const { data: credits, error: creditsError } = await supabase
     .from('Care_Credit')
-    .select('amount, status')
+    .select('credit_id, amount, status')
     .eq('barangay_id', me.barangay_id);
   if (creditsError) return res.status(500).json({ error: creditsError.message });
 
@@ -1229,21 +1283,246 @@ app.get('/lgu/me/dashboard', requireAuth, requireRole('lgu'), async (req, res) =
     .eq('barangay_id', me.barangay_id)
     .maybeSingle();
 
+  let safetyFlagByResident, moodByResident;
+  try {
+    [safetyFlagByResident, moodByResident] = await Promise.all([
+      getLatestSafetyFlagByResident(),
+      getRecentMoodByResident(),
+    ]);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+
+  const highRiskCount = residentIds.filter((id) => safetyFlagByResident.get(id) === true).length;
+
+  const moodValues = residentIds.map((id) => moodByResident.get(id)).filter((v) => v !== undefined);
+  const wellnessIndex = moodValues.length > 0
+    ? Math.round((moodValues.filter((v) => v >= 3).length / moodValues.length) * 100)
+    : null;
+
+  // "Used this month" is approximated from the Booking that consumed the
+  // credit (the status flip to 'used' happens on accept, which has no
+  // separate timestamp of its own) -- the booking's created_at is the
+  // closest real signal available.
+  const now = new Date();
+  const usedCreditIds = new Set(credits.filter((c) => c.status === 'used').map((c) => c.credit_id));
+  const usedThisMonthCreditIds = new Set(
+    bookings
+      .filter((b) => b.care_credit_id && usedCreditIds.has(b.care_credit_id))
+      .filter((b) => {
+        const d = new Date(b.created_at);
+        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+      })
+      .map((b) => b.care_credit_id)
+  );
+  const creditsUsedThisMonth = credits
+    .filter((c) => usedThisMonthCreditIds.has(c.credit_id))
+    .reduce((sum, c) => sum + Number(c.amount), 0);
+
+  // Weekly active residents, last 8 weeks: distinct residents who logged a
+  // mood entry that week -- the simplest honest proxy for "engaged."
+  const { data: weeklyMoods, error: weeklyMoodsError } = await supabase
+    .from('Mood_Entry')
+    .select('user_id, entry_date')
+    .in('user_id', residentIds.length ? residentIds : [0]);
+  if (weeklyMoodsError) return res.status(500).json({ error: weeklyMoodsError.message });
+
+  const weeks = [];
+  for (let i = 7; i >= 0; i--) {
+    const start = new Date();
+    start.setDate(start.getDate() - start.getDay() - i * 7);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+    weeks.push({ start, end, label: start.toLocaleDateString('en-PH', { month: 'short' }), residents: new Set() });
+  }
+  for (const m of weeklyMoods) {
+    const d = new Date(m.entry_date);
+    const week = weeks.find((w) => d >= w.start && d < w.end);
+    if (week) week.residents.add(m.user_id);
+  }
+
   const budgetFunded = budget ? Number(budget.total_funded) : 0;
   const budgetSpent = budget ? Number(budget.total_spent) : 0;
 
   res.json({
     barangay,
-    resident_count: residentCount || 0,
+    resident_count: residentIds.length,
     session_count: bookings.length,
     confirmed_session_count: bookings.filter((b) => b.status === 'confirmed').length,
+    high_risk_count: highRiskCount,
+    wellness_index: wellnessIndex,
     care_credits_issued: credits.reduce((sum, c) => sum + Number(c.amount), 0),
     care_credits_used: credits.filter((c) => c.status === 'used').reduce((sum, c) => sum + Number(c.amount), 0),
+    care_credits_used_this_month: creditsUsedThisMonth,
     budget_funded: budgetFunded,
     budget_spent: budgetSpent,
     budget_remaining: budgetFunded - budgetSpent,
     subscription_status: subscription?.status || 'inactive',
+    weekly_engagement: weeks.map((w) => ({ label: w.label, active_residents: w.residents.size })),
   });
+});
+
+// GET /lgu/me/residents — the logged-in LGU's own barangay residents, with
+// their latest check-in date and flag status. Real names are shown here
+// (unlike the psychologist-facing anonymization) since this IS the local
+// government responsible for these specific named residents.
+app.get('/lgu/me/residents', requireAuth, requireRole('lgu'), async (req, res) => {
+  const { data: me, error: meError } = await supabase
+    .from('User')
+    .select('barangay_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+  if (meError || !me) return res.status(404).json({ error: 'Account not found' });
+
+  const { data: residents, error: residentsError } = await supabase
+    .from('User')
+    .select('user_id, name')
+    .eq('role', 'resident')
+    .eq('barangay_id', me.barangay_id)
+    .order('name', { ascending: true });
+  if (residentsError) return res.status(500).json({ error: residentsError.message });
+
+  let safetyFlagByResident, moodByResident;
+  try {
+    [safetyFlagByResident, moodByResident] = await Promise.all([
+      getLatestSafetyFlagByResident(),
+      getRecentMoodByResident(),
+    ]);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+
+  const residentIds = residents.map((r) => r.user_id);
+  const { data: lastMoodDates, error: moodDatesError } = await supabase
+    .from('Mood_Entry')
+    .select('user_id, entry_date')
+    .in('user_id', residentIds.length ? residentIds : [0])
+    .order('entry_date', { ascending: false });
+  if (moodDatesError) return res.status(500).json({ error: moodDatesError.message });
+  const lastCheckInByUser = new Map();
+  for (const m of lastMoodDates) {
+    if (!lastCheckInByUser.has(m.user_id)) lastCheckInByUser.set(m.user_id, m.entry_date);
+  }
+
+  res.json(residents.map((r) => ({
+    user_id: r.user_id,
+    name: r.name,
+    last_check_in: lastCheckInByUser.get(r.user_id) || null,
+    recent_mood_level: moodByResident.get(r.user_id) ?? null,
+    flagged: safetyFlagByResident.get(r.user_id) === true,
+  })));
+});
+
+// POST /lgu/me/care-credits/issue — like /care-credits/allocate, but for the
+// LGU role: always scoped to the caller's own barangay, never a barangay_id
+// from the request body. body: { resident_id } to fund just one (must belong
+// to this barangay), or {} / { all: true } to fund every resident here.
+app.post('/lgu/me/care-credits/issue', requireAuth, requireRole('lgu'), async (req, res) => {
+  const { resident_id, amount } = req.body;
+
+  const numericAmount = Number(amount);
+  if (!amount || Number.isNaN(numericAmount) || numericAmount <= 0) {
+    return res.status(400).json({ error: 'amount must be a positive number' });
+  }
+
+  const { data: me, error: meError } = await supabase
+    .from('User')
+    .select('barangay_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+  if (meError || !me) return res.status(404).json({ error: 'Account not found' });
+
+  const handleAllocationError = (error, res) => {
+    if (error.message === 'RESIDENT_NOT_FOUND') return res.status(404).json({ error: 'Resident not found' });
+    if (error.message === 'SUBSCRIPTION_INACTIVE') return res.status(400).json({ error: "Your barangay's subscription is not active" });
+    if (error.message === 'NO_BUDGET_FOR_BARANGAY') return res.status(400).json({ error: 'Your barangay has no funded budget yet' });
+    if (error.message === 'INSUFFICIENT_BUDGET') return res.status(400).json({ error: 'Insufficient remaining budget' });
+    return res.status(500).json({ error: error.message });
+  };
+
+  if (resident_id) {
+    const { data: resident, error: residentError } = await supabase
+      .from('User')
+      .select('user_id, barangay_id')
+      .eq('user_id', resident_id)
+      .eq('role', 'resident')
+      .single();
+    if (residentError || !resident) return res.status(404).json({ error: 'Resident not found' });
+    if (resident.barangay_id !== me.barangay_id) {
+      return res.status(403).json({ error: 'This resident is not registered under your barangay' });
+    }
+
+    const { data, error } = await supabase.rpc('allocate_care_credit_single', {
+      p_resident_id: resident_id,
+      p_amount: numericAmount,
+    });
+    if (error) return handleAllocationError(error, res);
+    return res.status(201).json({ credits_issued: 1, total_amount: numericAmount, credits: [data] });
+  }
+
+  const { data, error } = await supabase.rpc('allocate_care_credits_bulk', {
+    p_barangay_id: me.barangay_id,
+    p_amount: numericAmount,
+  });
+  if (error) return handleAllocationError(error, res);
+  res.status(201).json(data);
+});
+
+// GET /lgu/citywide-overview — every barangay's risk band + residents-flagged
+// count, visible to ANY LGU account (not scoped to their own barangay) so a
+// barangay office has city-wide situational awareness without ever seeing
+// another barangay's individual residents. Same risk formula as the
+// dashboard's own high_risk_count, just computed for every barangay at once.
+app.get('/lgu/citywide-overview', requireAuth, requireRole('lgu'), async (req, res) => {
+  const { data: barangays, error: barangaysError } = await supabase
+    .from('Barangay')
+    .select('barangay_id, name, city');
+  if (barangaysError) return res.status(500).json({ error: barangaysError.message });
+
+  const { data: residents, error: residentsError } = await supabase
+    .from('User')
+    .select('user_id, barangay_id')
+    .eq('role', 'resident');
+  if (residentsError) return res.status(500).json({ error: residentsError.message });
+
+  let safetyFlagByResident;
+  try {
+    safetyFlagByResident = await getLatestSafetyFlagByResident();
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const { data: recentFlags, error: recentFlagsError } = await supabase
+    .from('Assessment_Result')
+    .select('user_id, created_at, safety_flag')
+    .eq('safety_flag', true)
+    .gte('created_at', sevenDaysAgo.toISOString());
+  if (recentFlagsError) return res.status(500).json({ error: recentFlagsError.message });
+
+  const residentsByBarangay = new Map();
+  for (const r of residents) {
+    if (!residentsByBarangay.has(r.barangay_id)) residentsByBarangay.set(r.barangay_id, []);
+    residentsByBarangay.get(r.barangay_id).push(r.user_id);
+  }
+  const recentFlagsByUser = new Set(recentFlags.map((f) => f.user_id));
+
+  res.json(barangays.map((b) => {
+    const ids = residentsByBarangay.get(b.barangay_id) || [];
+    const flaggedCount = ids.filter((id) => safetyFlagByResident.get(id) === true).length;
+    const recentFlagCount = ids.filter((id) => recentFlagsByUser.has(id)).length;
+    return {
+      barangay_id: b.barangay_id,
+      name: b.name,
+      city: b.city,
+      resident_count: ids.length,
+      high_risk_count: flaggedCount,
+      recent_flag_count: recentFlagCount,
+      risk_band: riskBandFor(flaggedCount, ids.length),
+    };
+  }));
 });
 
 // GET /admin/escalations — every emergency flag a psychologist has raised, most

@@ -1218,6 +1218,30 @@ async function getRecentMoodByResident() {
   return latestByUser;
 }
 
+// Generalized version of the above for an arbitrary [start, end) window, so
+// the monthly report can compare "this period" against "the period before
+// it" using the same latest-entry-per-resident logic.
+async function getMoodInWindowByResident(start, end) {
+  const { data: moods, error } = await supabase
+    .from('Mood_Entry')
+    .select('user_id, entry_date, mood_level')
+    .gte('entry_date', start.toISOString().slice(0, 10))
+    .lt('entry_date', end.toISOString().slice(0, 10))
+    .order('entry_date', { ascending: false });
+  if (error) throw error;
+
+  const latestByUser = new Map();
+  for (const m of moods) {
+    if (!latestByUser.has(m.user_id)) latestByUser.set(m.user_id, m.mood_level);
+  }
+  return latestByUser;
+}
+
+function wellnessIndexFrom(residentIds, moodByResident) {
+  const values = residentIds.map((id) => moodByResident.get(id)).filter((v) => v !== undefined);
+  return values.length > 0 ? Math.round((values.filter((v) => v >= 3).length / values.length) * 100) : null;
+}
+
 // 0 flagged -> Low. Otherwise the flagged share of residents buckets into
 // Mild/Moderate/High/Critical. A barangay with no residents at all gets its
 // own "No data" band rather than being misread as "Low" (safe).
@@ -1399,6 +1423,92 @@ app.get('/lgu/me/care-credits', requireAuth, requireRole('lgu'), async (req, res
     status: c.status,
     created_at: c.created_at,
   })));
+});
+
+// GET /lgu/me/monthly-report?month=YYYY-MM (defaults to the current month) --
+// the narrative "Auto-Generated Accomplishment Report": real counts for the
+// selected calendar month, not a static all-time snapshot. Every figure here
+// is directly queryable; there's deliberately no "AI Companion interactions"
+// line, since /crisis-companion/chat never persists a row anywhere -- nothing
+// backs that number honestly. Crisis escalations ARE real: a Crisis
+// Companion / Voice Journal escalation creates a Booking with
+// session_type = 'crisis' (see escalateCrisis()), so that's counted instead.
+app.get('/lgu/me/monthly-report', requireAuth, requireRole('lgu'), async (req, res) => {
+  const { data: me, error: meError } = await supabase
+    .from('User')
+    .select('barangay_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+  if (meError || !me) return res.status(404).json({ error: 'Account not found' });
+
+  const { data: barangay, error: barangayError } = await supabase
+    .from('Barangay')
+    .select('barangay_id, name, city')
+    .eq('barangay_id', me.barangay_id)
+    .single();
+  if (barangayError || !barangay) return res.status(404).json({ error: 'Barangay not found' });
+
+  const monthParam = req.query.month; // 'YYYY-MM'
+  const periodStart = monthParam ? new Date(`${monthParam}-01T00:00:00Z`) : new Date();
+  periodStart.setDate(1);
+  periodStart.setHours(0, 0, 0, 0);
+  if (Number.isNaN(periodStart.getTime())) return res.status(400).json({ error: 'Invalid month' });
+  const periodEnd = new Date(periodStart);
+  periodEnd.setMonth(periodEnd.getMonth() + 1);
+  const previousPeriodStart = new Date(periodStart);
+  previousPeriodStart.setMonth(previousPeriodStart.getMonth() - 1);
+
+  const { data: residents, error: residentsError } = await supabase
+    .from('User')
+    .select('user_id')
+    .eq('role', 'resident')
+    .eq('barangay_id', me.barangay_id);
+  if (residentsError) return res.status(500).json({ error: residentsError.message });
+  const residentIds = residents.map((r) => r.user_id);
+
+  const { data: allBookings, error: bookingsError } = await supabase
+    .from('Booking')
+    .select('status, session_type, schedule, User(barangay_id)');
+  if (bookingsError) return res.status(500).json({ error: bookingsError.message });
+  const periodBookings = allBookings.filter((b) => {
+    if (b.User?.barangay_id !== me.barangay_id) return false;
+    const d = new Date(b.schedule);
+    return d >= periodStart && d < periodEnd;
+  });
+
+  const { data: periodCredits, error: creditsError } = await supabase
+    .from('Care_Credit')
+    .select('amount, created_at')
+    .eq('barangay_id', me.barangay_id)
+    .gte('created_at', periodStart.toISOString())
+    .lt('created_at', periodEnd.toISOString());
+  if (creditsError) return res.status(500).json({ error: creditsError.message });
+
+  let currentMoodByResident, previousMoodByResident;
+  try {
+    [currentMoodByResident, previousMoodByResident] = await Promise.all([
+      getMoodInWindowByResident(periodStart, periodEnd),
+      getMoodInWindowByResident(previousPeriodStart, periodStart),
+    ]);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+
+  const wellnessIndex = wellnessIndexFrom(residentIds, currentMoodByResident);
+  const wellnessIndexPrevious = wellnessIndexFrom(residentIds, previousMoodByResident);
+
+  res.json({
+    barangay,
+    period_label: periodStart.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' }),
+    resident_count: residentIds.length,
+    sessions_requested: periodBookings.length,
+    sessions_confirmed: periodBookings.filter((b) => b.status === 'confirmed').length,
+    crisis_escalations: periodBookings.filter((b) => b.session_type === 'crisis').length,
+    wellness_index: wellnessIndex,
+    wellness_index_previous: wellnessIndexPrevious,
+    wellness_index_delta: wellnessIndex != null && wellnessIndexPrevious != null ? wellnessIndex - wellnessIndexPrevious : null,
+    care_credits_distributed: periodCredits.reduce((sum, c) => sum + Number(c.amount), 0),
+  });
 });
 
 // GET /lgu/me/residents — the logged-in LGU's own barangay residents, with

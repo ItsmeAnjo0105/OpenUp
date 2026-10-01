@@ -33,15 +33,17 @@ function LguLayout({ children }) {
   if (checking) return null;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-brand-bg">
-      <LguSidebar user={user} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
+    <div className="flex h-screen overflow-hidden bg-brand-bg print:h-auto print:overflow-visible print:block">
+      <div className="print:hidden">
+        <LguSidebar user={user} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
+      </div>
 
       {sidebarOpen && (
         <div className="fixed inset-0 bg-black/40 z-40 md:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
-      <main className="flex-1 px-8 py-8 overflow-y-auto">
-        <button onClick={() => setSidebarOpen(true)} className="md:hidden mb-6 text-2xl text-brand-ink/70">
+      <main className="flex-1 px-8 py-8 overflow-y-auto print:overflow-visible print:p-0">
+        <button onClick={() => setSidebarOpen(true)} className="md:hidden mb-6 text-2xl text-brand-ink/70 print:hidden">
           ☰
         </button>
         {children}

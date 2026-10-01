@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import PsychologistLayout from '../components/PsychologistLayout';
+import LguLayout from '../components/LguLayout';
 import { API_URL, authHeader, getStoredUser } from '../config';
 
 const TYPE_ICON = { message: '💬', system: '📢', reminder: '⏰' };
@@ -10,7 +11,7 @@ function Notifications() {
   const [notifications, setNotifications] = useState([]);
   const [error, setError] = useState('');
   const user = getStoredUser();
-  const LayoutForRole = user?.role === 'psychologist' ? PsychologistLayout : Layout;
+  const LayoutForRole = user?.role === 'psychologist' ? PsychologistLayout : user?.role === 'lgu' ? LguLayout : Layout;
 
   const load = () => {
     fetch(`${API_URL}/notifications`, { headers: authHeader() })

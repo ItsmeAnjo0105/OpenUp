@@ -1507,50 +1507,51 @@ app.post('/lgu/me/care-credits/issue', requireAuth, requireRole('lgu'), async (r
   res.status(201).json(data);
 });
 
-// GET /lgu/citywide-overview — every barangay's risk band + residents-flagged
-// count, visible to ANY LGU account (not scoped to their own barangay) so a
-// barangay office has city-wide situational awareness without ever seeing
-// another barangay's individual residents. Same risk formula as the
-// dashboard's own high_risk_count, just computed for every barangay at once.
-app.get('/lgu/citywide-overview', requireAuth, requireRole('lgu'), async (req, res) => {
+const HEATMAP_RANGE_DAYS = { week: 7, month: 30, quarter: 90 };
+
+// Shared by the LGU citywide overview and the Admin full heatmap: every
+// barangay's risk band for a given lookback window, based on DISTINCT
+// residents who raised >=1 safety flag within that window -- not just
+// "ever" -- so "This Week" vs "This Month" vs "This Quarter" actually mean
+// something different. recent_flag_count is the raw count of flagged
+// Assessment_Result rows in the window (a density signal; can exceed
+// resident_count if the same resident flags more than once).
+async function computeCitywideOverview(rangeDays) {
   const { data: barangays, error: barangaysError } = await supabase
     .from('Barangay')
     .select('barangay_id, name, city');
-  if (barangaysError) return res.status(500).json({ error: barangaysError.message });
+  if (barangaysError) throw barangaysError;
 
   const { data: residents, error: residentsError } = await supabase
     .from('User')
     .select('user_id, barangay_id')
     .eq('role', 'resident');
-  if (residentsError) return res.status(500).json({ error: residentsError.message });
+  if (residentsError) throw residentsError;
 
-  let safetyFlagByResident;
-  try {
-    safetyFlagByResident = await getLatestSafetyFlagByResident();
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-  const { data: recentFlags, error: recentFlagsError } = await supabase
+  const windowStart = new Date();
+  windowStart.setDate(windowStart.getDate() - rangeDays);
+  const { data: windowFlags, error: windowFlagsError } = await supabase
     .from('Assessment_Result')
-    .select('user_id, created_at, safety_flag')
+    .select('user_id, created_at')
     .eq('safety_flag', true)
-    .gte('created_at', sevenDaysAgo.toISOString());
-  if (recentFlagsError) return res.status(500).json({ error: recentFlagsError.message });
+    .gte('created_at', windowStart.toISOString());
+  if (windowFlagsError) throw windowFlagsError;
 
   const residentsByBarangay = new Map();
   for (const r of residents) {
     if (!residentsByBarangay.has(r.barangay_id)) residentsByBarangay.set(r.barangay_id, []);
     residentsByBarangay.get(r.barangay_id).push(r.user_id);
   }
-  const recentFlagsByUser = new Set(recentFlags.map((f) => f.user_id));
+  const flaggedUserIdsInWindow = new Set(windowFlags.map((f) => f.user_id));
+  const flagEventCountByUser = new Map();
+  for (const f of windowFlags) {
+    flagEventCountByUser.set(f.user_id, (flagEventCountByUser.get(f.user_id) || 0) + 1);
+  }
 
-  res.json(barangays.map((b) => {
+  return barangays.map((b) => {
     const ids = residentsByBarangay.get(b.barangay_id) || [];
-    const flaggedCount = ids.filter((id) => safetyFlagByResident.get(id) === true).length;
-    const recentFlagCount = ids.filter((id) => recentFlagsByUser.has(id)).length;
+    const flaggedCount = ids.filter((id) => flaggedUserIdsInWindow.has(id)).length;
+    const recentFlagCount = ids.reduce((sum, id) => sum + (flagEventCountByUser.get(id) || 0), 0);
     return {
       barangay_id: b.barangay_id,
       name: b.name,
@@ -1560,7 +1561,34 @@ app.get('/lgu/citywide-overview', requireAuth, requireRole('lgu'), async (req, r
       recent_flag_count: recentFlagCount,
       risk_band: riskBandFor(flaggedCount, ids.length),
     };
-  }));
+  });
+}
+
+// GET /lgu/citywide-overview?range=week|month|quarter (default week) — every
+// barangay's risk band, visible to ANY LGU account (not scoped to their own
+// barangay) so a barangay office has city-wide situational awareness
+// without ever seeing another barangay's individual residents.
+app.get('/lgu/citywide-overview', requireAuth, requireRole('lgu'), async (req, res) => {
+  const rangeDays = HEATMAP_RANGE_DAYS[req.query.range] || HEATMAP_RANGE_DAYS.week;
+  try {
+    res.json(await computeCitywideOverview(rangeDays));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /admin/heatmap-overview?range=week|month|quarter (default week) — the
+// Admin-facing "View All-Barangay Heatmap (Full)": same aggregated risk-band
+// data as the LGU view, not a different (e.g. raw resident-level) dataset --
+// a heatmap is an aggregate visualization by nature; Admin already has raw
+// resident data elsewhere (Manage Users, etc.) if it's ever needed.
+app.get('/admin/heatmap-overview', requireAuth, requireRole('admin'), async (req, res) => {
+  const rangeDays = HEATMAP_RANGE_DAYS[req.query.range] || HEATMAP_RANGE_DAYS.week;
+  try {
+    res.json(await computeCitywideOverview(rangeDays));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // GET /admin/escalations — every emergency flag a psychologist has raised, most

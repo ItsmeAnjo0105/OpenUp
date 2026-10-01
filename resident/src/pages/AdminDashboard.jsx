@@ -26,6 +26,20 @@ function downloadAccomplishmentCsv(rows) {
   URL.revokeObjectURL(url);
 }
 
+const RISK_STYLE = {
+  no_data: { bg: 'bg-brand-ink/10', text: 'text-brand-ink/40', label: 'No data' },
+  low: { bg: 'bg-green-200', text: 'text-green-800', label: 'Low' },
+  mild: { bg: 'bg-lime-200', text: 'text-lime-800', label: 'Mild' },
+  moderate: { bg: 'bg-amber-200', text: 'text-amber-800', label: 'Moderate' },
+  high: { bg: 'bg-orange-300', text: 'text-orange-900', label: 'High' },
+  critical: { bg: 'bg-red-300', text: 'text-red-900', label: 'Critical' },
+};
+const HEATMAP_RANGES = [
+  { key: 'week', label: 'This Week' },
+  { key: 'month', label: 'This Month' },
+  { key: 'quarter', label: 'This Quarter' },
+];
+
 function AdminDashboard() {
   const [checking, setChecking] = useState(true);
   const [pending, setPending] = useState([]);
@@ -55,6 +69,9 @@ function AdminDashboard() {
   const [lguForm, setLguForm] = useState({ name: '', email: '', password: '', barangay_id: '' });
   const [editingLguId, setEditingLguId] = useState(null);
   const [editLguDraft, setEditLguDraft] = useState({ name: '', email: '' });
+  const [heatmap, setHeatmap] = useState([]);
+  const [heatmapError, setHeatmapError] = useState('');
+  const [heatmapRange, setHeatmapRange] = useState('week');
   const navigate = useNavigate();
   const user = getStoredUser();
 
@@ -101,6 +118,16 @@ function AdminDashboard() {
         if (ok && Array.isArray(data)) setVerifiedPsychologists(data);
       })
       .catch(() => {});
+  };
+
+  const loadHeatmap = (range) => {
+    fetch(`${API_URL}/admin/heatmap-overview?range=${range}`, { headers: authHeader() })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (ok && Array.isArray(data)) setHeatmap(data);
+        else setHeatmapError(data?.error || 'Could not load the heatmap.');
+      })
+      .catch(() => setHeatmapError('Could not reach the server.'));
   };
 
   const loadLguAccounts = () => {
@@ -167,6 +194,7 @@ function AdminDashboard() {
         loadEscalations();
         loadAccomplishmentReport();
         loadLguAccounts();
+        loadHeatmap('week');
       })
       .catch(() => {
         localStorage.removeItem('openup_token');
@@ -355,6 +383,11 @@ function AdminDashboard() {
     } catch {
       setLguError('Could not reach the server.');
     }
+  };
+
+  const changeHeatmapRange = (range) => {
+    setHeatmapRange(range);
+    loadHeatmap(range);
   };
 
   const toggleLguStatus = async (targetUser) => {
@@ -974,6 +1007,53 @@ function AdminDashboard() {
               </table>
             </div>
           )}
+        </div>
+
+        <div className="bg-brand-surface rounded-2xl shadow-sm p-6 mt-6">
+          <h2 className="font-display text-lg font-semibold mb-1">Mental Health Heatmap -- All Barangays</h2>
+          <p className="text-xs text-brand-ink/50 mb-4">
+            Color intensity reflects reported distress & crisis-flag density. Risk band reflects distinct
+            flagged residents within the selected window.
+          </p>
+
+          {heatmapError && <p className="text-sm text-red-600 mb-3">{heatmapError}</p>}
+
+          <div className="flex flex-wrap gap-2 mb-4">
+            {HEATMAP_RANGES.map((r) => (
+              <button
+                key={r.key}
+                onClick={() => changeHeatmapRange(r.key)}
+                className={`text-xs font-medium px-3.5 py-1.5 rounded-full ${
+                  heatmapRange === r.key ? 'bg-brand-primary text-white' : 'border border-brand-ink/15 text-brand-ink/70'
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+
+          {heatmap.length === 0 ? (
+            <p className="text-sm text-brand-ink/50">No barangays found.</p>
+          ) : (
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+              {heatmap.map((b) => {
+                const style = RISK_STYLE[b.risk_band] || RISK_STYLE.no_data;
+                return (
+                  <div key={b.barangay_id} className={`rounded-xl px-2 py-3 text-center ${style.bg} ${style.text}`}>
+                    <p className="text-[11px] font-medium leading-tight truncate">{b.name}</p>
+                    <p className="text-[10px] opacity-70 mt-0.5">{b.high_risk_count}/{b.resident_count}</p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-3 mt-4 text-[11px] text-brand-ink/50">
+            {Object.entries(RISK_STYLE).map(([key, s]) => (
+              <span key={key} className="flex items-center gap-1.5">
+                <span className={`w-2.5 h-2.5 rounded-sm ${s.bg}`} /> {s.label}
+              </span>
+            ))}
+          </div>
         </div>
 
         <div className="bg-brand-surface rounded-2xl shadow-sm p-6 mt-6">

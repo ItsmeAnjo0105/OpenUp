@@ -24,6 +24,16 @@ import PsychologistProfile from './pages/PsychologistProfile';
 import AdminDashboard from './pages/AdminDashboard';
 import LguDashboard from './pages/LguDashboard';
 import LguResidents from './pages/LguResidents';
+import LguHeatmap from './pages/LguHeatmap';
+import LguRiskAlerts from './pages/LguRiskAlerts';
+import LguReport from './pages/LguReport';
+import LguCareCredits from './pages/LguCareCredits';
+import LguFunding from './pages/LguFunding';
+import LguAiEffectiveness from './pages/LguAiEffectiveness';
+import LguResourceAllocation from './pages/LguResourceAllocation';
+import LguWellnessIndex from './pages/LguWellnessIndex';
+import LguDataGovernance from './pages/LguDataGovernance';
+import LguPsychologistDirectory from './pages/LguPsychologistDirectory';
 import AnonymousChat from './pages/AnonymousChat';
 import PaymentResult from './pages/PaymentResult';
 import Profile from './pages/Profile';
@@ -58,7 +68,17 @@ function App() {
       <Route path="/psychologist/profile" element={<PsychologistProfile />} />
       <Route path="/admin/dashboard" element={<AdminDashboard />} />
       <Route path="/lgu/dashboard" element={<LguDashboard />} />
+      <Route path="/lgu/heatmap" element={<LguHeatmap />} />
+      <Route path="/lgu/risk-alerts" element={<LguRiskAlerts />} />
       <Route path="/lgu/residents" element={<LguResidents />} />
+      <Route path="/lgu/report" element={<LguReport />} />
+      <Route path="/lgu/care-credits" element={<LguCareCredits />} />
+      <Route path="/lgu/funding" element={<LguFunding />} />
+      <Route path="/lgu/ai-effectiveness" element={<LguAiEffectiveness />} />
+      <Route path="/lgu/resource-allocation" element={<LguResourceAllocation />} />
+      <Route path="/lgu/wellness-index" element={<LguWellnessIndex />} />
+      <Route path="/lgu/data-governance" element={<LguDataGovernance />} />
+      <Route path="/lgu/psychologists" element={<LguPsychologistDirectory />} />
       <Route path="/anonymous-chat" element={<AnonymousChat />} />
       <Route path="/payment/result" element={<PaymentResult />} />
       <Route path="/profile" element={<Profile />} />

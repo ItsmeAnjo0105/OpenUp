@@ -1319,11 +1319,13 @@ app.get('/lgu/me/dashboard', requireAuth, requireRole('lgu'), async (req, res) =
     .filter((c) => usedThisMonthCreditIds.has(c.credit_id))
     .reduce((sum, c) => sum + Number(c.amount), 0);
 
-  // Weekly active residents, last 8 weeks: distinct residents who logged a
-  // mood entry that week -- the simplest honest proxy for "engaged."
+  // Weekly active residents + weekly wellness index, last 8 weeks: distinct
+  // residents who logged a mood entry that week, and what share of them
+  // logged "Okay" or better -- the same formula as the current wellness
+  // index above, just bucketed by week instead of a single 30-day window.
   const { data: weeklyMoods, error: weeklyMoodsError } = await supabase
     .from('Mood_Entry')
-    .select('user_id, entry_date')
+    .select('user_id, entry_date, mood_level')
     .in('user_id', residentIds.length ? residentIds : [0]);
   if (weeklyMoodsError) return res.status(500).json({ error: weeklyMoodsError.message });
 
@@ -1334,12 +1336,13 @@ app.get('/lgu/me/dashboard', requireAuth, requireRole('lgu'), async (req, res) =
     start.setHours(0, 0, 0, 0);
     const end = new Date(start);
     end.setDate(end.getDate() + 7);
-    weeks.push({ start, end, label: start.toLocaleDateString('en-PH', { month: 'short' }), residents: new Set() });
+    weeks.push({ start, end, label: start.toLocaleDateString('en-PH', { month: 'short' }), residents: new Map() });
   }
   for (const m of weeklyMoods) {
     const d = new Date(m.entry_date);
     const week = weeks.find((w) => d >= w.start && d < w.end);
-    if (week) week.residents.add(m.user_id);
+    // Last entry seen per resident per week wins (closest to "current" for that week).
+    if (week) week.residents.set(m.user_id, m.mood_level);
   }
 
   const budgetFunded = budget ? Number(budget.total_funded) : 0;
@@ -1360,7 +1363,42 @@ app.get('/lgu/me/dashboard', requireAuth, requireRole('lgu'), async (req, res) =
     budget_remaining: budgetFunded - budgetSpent,
     subscription_status: subscription?.status || 'inactive',
     weekly_engagement: weeks.map((w) => ({ label: w.label, active_residents: w.residents.size })),
+    wellness_trend: weeks.map((w) => {
+      const levels = [...w.residents.values()];
+      return {
+        label: w.label,
+        index: levels.length > 0 ? Math.round((levels.filter((v) => v >= 3).length / levels.length) * 100) : null,
+      };
+    }),
   });
+});
+
+// GET /lgu/me/care-credits — the logged-in LGU's own barangay's Care Credit
+// ledger (who received what, and whether it's been used), plus summary
+// totals -- backs both the OpenUp Care Credits and Resource Allocation pages.
+app.get('/lgu/me/care-credits', requireAuth, requireRole('lgu'), async (req, res) => {
+  const { data: me, error: meError } = await supabase
+    .from('User')
+    .select('barangay_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+  if (meError || !me) return res.status(404).json({ error: 'Account not found' });
+
+  const { data: credits, error: creditsError } = await supabase
+    .from('Care_Credit')
+    .select('credit_id, resident_id, amount, status, created_at, User(name)')
+    .eq('barangay_id', me.barangay_id)
+    .order('created_at', { ascending: false });
+  if (creditsError) return res.status(500).json({ error: creditsError.message });
+
+  res.json(credits.map((c) => ({
+    credit_id: c.credit_id,
+    resident_id: c.resident_id,
+    resident_name: c.User?.name || `Resident #${c.resident_id}`,
+    amount: Number(c.amount),
+    status: c.status,
+    created_at: c.created_at,
+  })));
 });
 
 // GET /lgu/me/residents — the logged-in LGU's own barangay residents, with

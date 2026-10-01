@@ -5,8 +5,18 @@ import { playHover, playClick } from '../utils/sound';
 
 const items = [
   { label: 'LGU Dashboard', path: '/lgu/dashboard', icon: '🏠', color: 'bg-emerald-400/20' },
-  { label: 'Manage Residents', path: '/lgu/residents', icon: '👥', color: 'bg-sky-400/20' },
-  { label: 'Notifications', path: '/notifications', icon: '🔔', color: 'bg-yellow-400/20' },
+  { label: 'Mental Health Heatmap', path: '/lgu/heatmap', icon: '🗺️', color: 'bg-sky-400/20' },
+  { label: 'Barangay Risk Alerts', path: '/lgu/risk-alerts', icon: '⚠️', color: 'bg-amber-400/20' },
+  { label: 'Manage Barangay Residents', path: '/lgu/residents', icon: '👥', color: 'bg-indigo-400/20' },
+  { label: 'Accomplishment Report', path: '/lgu/report', icon: '📄', color: 'bg-teal-400/20' },
+  { label: 'OpenUp Care Credits', path: '/lgu/care-credits', icon: '💳', color: 'bg-cyan-400/20' },
+  { label: 'Funding & Budget Analytics', path: '/lgu/funding', icon: '💰', color: 'bg-yellow-400/20' },
+  { label: 'AI Effectiveness Tracker', path: '/lgu/ai-effectiveness', icon: '🤖', color: 'bg-rose-400/20' },
+  { label: 'Resource Allocation', path: '/lgu/resource-allocation', icon: '🎯', color: 'bg-pink-400/20' },
+  { label: 'Community Wellness Index', path: '/lgu/wellness-index', icon: '📊', color: 'bg-lime-400/20' },
+  { label: 'Data Governance & Consent', path: '/lgu/data-governance', icon: '🔒', color: 'bg-orange-400/20' },
+  { label: 'Psychologist Directory', path: '/lgu/psychologists', icon: '🩺', color: 'bg-violet-400/20' },
+  { label: 'Notifications', path: '/notifications', icon: '🔔', color: 'bg-fuchsia-400/20' },
 ];
 
 function LguSidebar({ user, sidebarOpen, setSidebarOpen }) {

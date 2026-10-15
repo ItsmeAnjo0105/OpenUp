@@ -1618,6 +1618,101 @@ app.get('/lgu/me/ai-effectiveness', requireAuth, requireRole('lgu'), async (req,
   });
 });
 
+// GET /lgu/me/data-governance — real data behind Data Governance & Consent,
+// scoped to this barangay's own residents:
+//   - Consent: coverage from Consent_Record (consent_type='assessment'),
+//     tied to the one real consent gate in the app (see POST /assessment).
+//     Residents who haven't taken an assessment yet simply have no record --
+//     that's accurate, not a bug, and the page says so.
+//   - Data access: which psychologists currently have a confirmed-booking
+//     relationship with a resident here, and which Admin accounts exist
+//     (Admin has platform-wide access by design). A real access OVERVIEW,
+//     not a permission-editing tool -- there's no access-control system in
+//     this app to toggle, so "manage" here means "see who can see this."
+//   - Compliance: real, verifiable facts about this schema (RLS posture,
+//     note-privacy guarantees already enforced elsewhere), not an invented
+//     percentage against a compliance framework this app was never scored
+//     against.
+app.get('/lgu/me/data-governance', requireAuth, requireRole('lgu'), async (req, res) => {
+  const { data: me, error: meError } = await supabase
+    .from('User')
+    .select('barangay_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+  if (meError || !me) return res.status(404).json({ error: 'Account not found' });
+
+  const { data: residents, error: residentsError } = await supabase
+    .from('User')
+    .select('user_id')
+    .eq('role', 'resident')
+    .eq('barangay_id', me.barangay_id);
+  if (residentsError) return res.status(500).json({ error: residentsError.message });
+  const residentIds = residents.map((r) => r.user_id);
+  const idFilter = residentIds.length ? residentIds : [0];
+
+  const { data: consents, error: consentsError } = await supabase
+    .from('Consent_Record')
+    .select('user_id, consent_type, granted_at')
+    .in('user_id', idFilter)
+    .order('granted_at', { ascending: false });
+  if (consentsError) return res.status(500).json({ error: consentsError.message });
+  const consentedResidentIds = new Set(consents.map((c) => c.user_id));
+
+  const { data: confirmedBookings, error: bookingsError } = await supabase
+    .from('Booking')
+    .select('resident_id, Psychologist(psychologist_id, User(name))')
+    .in('resident_id', idFilter)
+    .eq('status', 'confirmed');
+  if (bookingsError) return res.status(500).json({ error: bookingsError.message });
+
+  const residentsByPsychologist = new Map();
+  for (const b of confirmedBookings) {
+    const psychId = b.Psychologist?.psychologist_id;
+    if (!psychId) continue;
+    if (!residentsByPsychologist.has(psychId)) {
+      residentsByPsychologist.set(psychId, { name: b.Psychologist.User?.name || `Psychologist #${psychId}`, residentIds: new Set() });
+    }
+    residentsByPsychologist.get(psychId).residentIds.add(b.resident_id);
+  }
+  const psychologistsWithAccess = [...residentsByPsychologist.values()].map((p) => ({
+    name: p.name,
+    resident_count: p.residentIds.size,
+  }));
+
+  const { data: adminAccounts, error: adminError } = await supabase
+    .from('User')
+    .select('name')
+    .eq('role', 'admin');
+  if (adminError) return res.status(500).json({ error: adminError.message });
+
+  const consentCoverage = residentIds.length > 0
+    ? Math.round((consentedResidentIds.size / residentIds.length) * 100)
+    : null;
+
+  res.json({
+    consent: {
+      resident_count: residentIds.length,
+      residents_with_consent: consentedResidentIds.size,
+      coverage_percent: consentCoverage,
+      total_records: consents.length,
+      recent: consents.slice(0, 10),
+    },
+    data_access: {
+      psychologists: psychologistsWithAccess,
+      admin_account_count: adminAccounts.length,
+    },
+    compliance: {
+      consent_coverage_percent: consentCoverage,
+      facts: [
+        'Every database table is protected by Row Level Security; only the backend service role can read or write data directly.',
+        'Psychologist session notes are private to the psychologist who wrote them -- never visible to the resident, other psychologists, or LGU/Admin accounts.',
+        'An LGU account only ever sees aggregated, anonymized figures for barangays other than its own -- never another barangay\'s individual residents.',
+        'Anonymous Chat messages mask the resident\'s identity by default; revealing it is an explicit per-message choice the resident makes.',
+      ],
+    },
+  });
+});
+
 // GET /lgu/me/residents — the logged-in LGU's own barangay residents, with
 // their latest check-in date and flag status. Real names are shown here
 // (unlike the psychologist-facing anonymization) since this IS the local
@@ -3867,6 +3962,12 @@ app.post('/assessment', async (req, res) => {
     .select();
 
   if (error) return res.status(500).json({ error: error.message });
+
+  // Records the consent the resident just gave on the consent screen before
+  // this submission (see Assessment.jsx's consentChecked gate) -- a real
+  // record of a real action, not a fabricated "agreed to terms" event.
+  // Best-effort: the assessment itself is already saved either way.
+  supabase.from('Consent_Record').insert([{ user_id, consent_type: 'assessment' }]).then(() => {});
 
   res.status(201).json({
     ...data[0],

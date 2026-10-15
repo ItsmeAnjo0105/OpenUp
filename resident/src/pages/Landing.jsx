@@ -495,16 +495,18 @@ function Landing() {
                   </div>
                 </div>
 
-                {/* motivational sticky note, upper-right */}
-                <div className="lp-float-f absolute right-0 top-40 w-32" style={{ transform: 'translateZ(170px)' }}>
+                {/* motivational sticky note -- below the psychologist card,
+                    clear of it instead of sitting on top of its text */}
+                <div className="lp-float-f absolute right-0 top-[235px] w-32" style={{ transform: 'translateZ(170px)' }}>
                   <div className="lp-pop bg-amber-50 rounded-xl shadow-xl p-3 rotate-2" style={{ '--pop-rotate': '0deg' }}>
                     <SvgIcon name="heart" className="w-3.5 h-3.5 text-rose-400 mb-1" />
                     <p className="text-[10px] font-semibold text-slate-600 leading-snug">Small steps make big changes.</p>
                   </div>
                 </div>
 
-                {/* star accent */}
-                <div className="lp-float-c absolute right-28 top-44 w-9 h-9" style={{ transform: 'translateZ(140px)' }}>
+                {/* star accent -- in the open gap between the mood card and
+                    the psychologist card, not on top of either */}
+                <div className="lp-float-c absolute left-[260px] top-[72px] w-9 h-9" style={{ transform: 'translateZ(140px)' }}>
                   <Emoji3D path="Star/3D/star_3d.png" className="lp-pop w-full h-full drop-shadow-md" rotate="14deg" />
                 </div>
 
@@ -530,13 +532,15 @@ function Landing() {
                   </div>
                 </div>
 
-                {/* speech-bubble dots accent, bottom-center */}
-                <div className="lp-float-d absolute left-52 bottom-12 w-12 h-12" style={{ transform: 'translateZ(100px)' }}>
+                {/* speech-bubble accent -- in the gap between the two bottom
+                    cards, above both of them instead of over the chat card */}
+                <div className="lp-float-d absolute left-[270px] top-[255px] w-12 h-12" style={{ transform: 'translateZ(100px)' }}>
                   <Emoji3D path="Speech balloon/3D/speech_balloon_3d.png" className="lp-pop w-full h-full drop-shadow-lg" rotate="-5deg" />
                 </div>
 
-                {/* brain in a circle, bottom-left */}
-                <div className="lp-float-a absolute left-20 bottom-0 w-20 h-20" style={{ transform: 'translateZ(120px)' }}>
+                {/* brain in a circle -- the open middle-left space, clear of
+                    the chat card below it */}
+                <div className="lp-float-a absolute left-0 top-[225px] w-20 h-20" style={{ transform: 'translateZ(120px)' }}>
                   <div className="lp-pop w-full h-full rounded-full bg-teal-50 shadow-lg flex items-center justify-center p-3" style={{ '--pop-rotate': '-4deg' }}>
                     <Emoji3D path="Brain/3D/brain_3d.png" className="w-full h-full" />
                   </div>

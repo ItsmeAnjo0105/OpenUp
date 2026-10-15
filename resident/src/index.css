@@ -200,11 +200,15 @@ textarea:focus-visible,
 .lp-reveal-js.lp-cta-zoom { transform: perspective(1200px) translateZ(-200px) scale(.85); }
 .lp-reveal-js.lp-cta-zoom.is-in { transform: perspective(1200px) translateZ(0) scale(1); }
 
-/* Hover tilt for feature/card tiles + button lift -- plain CSS :hover, so
-   this always works regardless of scroll-timeline support. */
-.lp-tilt { transition: transform 220ms ease, box-shadow 220ms ease; }
-.lp-tilt:hover { transform: perspective(900px) rotateX(7deg) rotateY(-8deg) translateY(-8px); box-shadow: 0 20px 40px rgba(15, 118, 110, 0.25); }
-.lp-tilt-alt:hover { transform: perspective(900px) rotateX(7deg) rotateY(8deg) translateY(-8px); }
+/* Every card: cursor-tracked tilt + zoom (see TiltCard in Landing.jsx, which
+   drives .style.transform directly on mousemove/mouseleave for full frame
+   rate). This class only supplies the resting transition + hover glow. */
+.lp-tilt-card {
+  transition: transform 500ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 300ms ease;
+  will-change: transform;
+}
+.lp-tilt-card:hover { box-shadow: 0 28px 52px rgba(15, 118, 110, 0.3); }
+
 .lp-btn-lift { transition: transform 200ms ease, box-shadow 200ms ease; }
 .lp-btn-lift:hover { transform: translateZ(10px) translateY(-2px); box-shadow: 0 14px 28px rgba(15, 118, 110, 0.3); }
 

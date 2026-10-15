@@ -163,6 +163,36 @@ function Reveal({ children, variant, className = '', delay = 0 }) {
   );
 }
 
+// Every card on the page: tilts toward the cursor and zooms in on hover, with
+// a snappy follow while the mouse moves and a springy settle back on leave.
+// Driven imperatively (direct style writes, not React state) so it tracks the
+// cursor at full frame rate with zero re-render overhead.
+function TiltCard({ children, className = '' }) {
+  const ref = useRef(null);
+
+  const handleMove = (e) => {
+    if (prefersReducedMotion() || !ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width;
+    const py = (e.clientY - rect.top) / rect.height;
+    const rx = (0.5 - py) * 16;
+    const ry = (px - 0.5) * 16;
+    ref.current.style.transition = 'transform 90ms linear';
+    ref.current.style.transform = `perspective(900px) rotateX(${rx}deg) rotateY(${ry}deg) scale(1.06) translateY(-10px)`;
+  };
+  const handleLeave = () => {
+    if (!ref.current) return;
+    ref.current.style.transition = 'transform 500ms cubic-bezier(0.2, 0.8, 0.2, 1)';
+    ref.current.style.transform = '';
+  };
+
+  return (
+    <div ref={ref} onMouseMove={handleMove} onMouseLeave={handleLeave} className={`lp-tilt-card ${className}`}>
+      {children}
+    </div>
+  );
+}
+
 const NAV_LINKS = [
   { href: '#home', label: 'Home' },
   { href: '#about', label: 'About Us' },
@@ -231,19 +261,56 @@ function Landing() {
   const aboutParallax = useScrollProgress(aboutRef, 0.5);
   const trustParallax = useScrollProgress(trustRef, 0.5);
   const ctaParallax = useScrollProgress(ctaRef, 0.5);
-  const cubeProgress = useScrollProgress(cubeWrapRef, 0.5);
 
-  // Hover tilt on the cube, same mouse-tracked pattern as the hero stage --
-  // on top of (not instead of) its scroll-driven spin.
-  const [cubeTilt, setCubeTilt] = useState({ rx: 0, ry: 0 });
+  // Trust cube: a continuous 360deg auto-spin, nudged by scroll position and
+  // by cursor hover -- all three combined into one transform, written
+  // directly to the DOM every frame (not React state) so it's perfectly
+  // smooth instead of fighting a per-render tilt/scroll value.
+  const cubeInnerRef = useRef(null);
+  const cubeMotion = useRef({ auto: 0, tiltRx: 0, tiltRy: 0 });
+
+  useEffect(() => {
+    if (prefersReducedMotion()) return;
+    const SPIN_MS = 14000; // one full lap every 14s
+    let raf;
+    let last = performance.now();
+
+    const tick = (now) => {
+      const dt = now - last;
+      last = now;
+      cubeMotion.current.auto = (cubeMotion.current.auto + (dt / SPIN_MS) * 360) % 360;
+
+      let scrollSpin = 0;
+      if (cubeWrapRef.current) {
+        const rect = cubeWrapRef.current.getBoundingClientRect();
+        const vh = window.innerHeight || document.documentElement.clientHeight;
+        const p = Math.min(1, Math.max(0, (vh - rect.top) / (vh + rect.height)));
+        scrollSpin = (p - 0.5) * 180;
+      }
+
+      if (cubeInnerRef.current) {
+        const { auto, tiltRx, tiltRy } = cubeMotion.current;
+        cubeInnerRef.current.style.transform =
+          `rotateX(${-18 + tiltRx}deg) rotateY(${auto + scrollSpin + tiltRy}deg)`;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   const handleCubeMouseMove = (e) => {
-    if (reducedMotionRef.current || !cubeWrapRef.current) return;
+    if (prefersReducedMotion() || !cubeWrapRef.current) return;
     const rect = cubeWrapRef.current.getBoundingClientRect();
     const px = (e.clientX - rect.left) / rect.width;
     const py = (e.clientY - rect.top) / rect.height;
-    setCubeTilt({ rx: -(py - 0.5) * 24, ry: (px - 0.5) * 36 });
+    cubeMotion.current.tiltRx = -(py - 0.5) * 20;
+    cubeMotion.current.tiltRy = (px - 0.5) * 30;
   };
-  const handleCubeMouseLeave = () => setCubeTilt({ rx: 0, ry: 0 });
+  const handleCubeMouseLeave = () => {
+    cubeMotion.current.tiltRx = 0;
+    cubeMotion.current.tiltRy = 0;
+  };
 
   return (
     <div className="min-h-screen bg-white text-slate-700" style={{ fontFamily: "'Figtree', sans-serif" }}>
@@ -430,12 +497,14 @@ function Landing() {
                 { icon: 'badge', title: 'Licensed psychologists', desc: 'A platform to reach residents who need support, with verified credentials and clear records.' },
                 { icon: 'shieldCheck', title: 'Local government units', desc: 'Anonymized, aggregated insight into community wellness, to guide local mental health programs.' },
               ].map((c, i) => (
-                <Reveal key={c.title} delay={i * 80} className="lp-tilt bg-white rounded-[20px] shadow-sm p-7">
-                  <span className="inline-flex w-12 h-12 rounded-xl bg-teal-50 text-teal-700 items-center justify-center">
-                    <SvgIcon name={c.icon} className="w-6 h-6" />
-                  </span>
-                  <h3 className="mt-4 font-bold text-lg text-slate-900">{c.title}</h3>
-                  <p className="mt-2 text-sm text-slate-600">{c.desc}</p>
+                <Reveal key={c.title} delay={i * 80}>
+                  <TiltCard className="bg-white rounded-[20px] shadow-sm p-7">
+                    <span className="inline-flex w-12 h-12 rounded-xl bg-teal-50 text-teal-700 items-center justify-center">
+                      <SvgIcon name={c.icon} className="w-6 h-6" />
+                    </span>
+                    <h3 className="mt-4 font-bold text-lg text-slate-900">{c.title}</h3>
+                    <p className="mt-2 text-sm text-slate-600">{c.desc}</p>
+                  </TiltCard>
                 </Reveal>
               ))}
             </div>
@@ -452,16 +521,14 @@ function Landing() {
 
             <div className="mt-14 grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
               {FEATURES.map((f, i) => (
-                <Reveal
-                  key={f.title}
-                  delay={(i % 4) * 70}
-                  className={`${i % 2 === 0 ? 'lp-tilt' : 'lp-tilt-alt'} bg-white border border-slate-100 rounded-[20px] shadow-sm p-6`}
-                >
-                  <span className="inline-flex w-11 h-11 rounded-xl bg-teal-50 text-teal-700 items-center justify-center">
-                    <SvgIcon name={f.icon} className="w-5 h-5" />
-                  </span>
-                  <h3 className="mt-4 font-bold text-slate-900">{f.title}</h3>
-                  <p className="mt-1.5 text-sm text-slate-600">{f.desc}</p>
+                <Reveal key={f.title} delay={(i % 4) * 70}>
+                  <TiltCard className="bg-white border border-slate-100 rounded-[20px] shadow-sm p-6">
+                    <span className="inline-flex w-11 h-11 rounded-xl bg-teal-50 text-teal-700 items-center justify-center">
+                      <SvgIcon name={f.icon} className="w-5 h-5" />
+                    </span>
+                    <h3 className="mt-4 font-bold text-slate-900">{f.title}</h3>
+                    <p className="mt-1.5 text-sm text-slate-600">{f.desc}</p>
+                  </TiltCard>
                 </Reveal>
               ))}
             </div>
@@ -485,11 +552,11 @@ function Landing() {
             <div className="mt-14 grid sm:grid-cols-3 gap-8">
               {STEPS.map((s, i) => (
                 <Reveal key={s.n} variant={i % 2 === 0 ? 'swing-left' : 'swing-right'}>
-                  <div className="lp-tilt bg-white rounded-[20px] shadow-sm p-7 h-full">
+                  <TiltCard className="bg-white rounded-[20px] shadow-sm p-7 h-full">
                     <span className="font-extrabold text-3xl text-teal-700/30">{s.n}</span>
                     <h3 className="mt-3 font-bold text-lg text-slate-900">{s.title}</h3>
                     <p className="mt-2 text-sm text-slate-600">{s.desc}</p>
-                  </div>
+                  </TiltCard>
                 </Reveal>
               ))}
             </div>
@@ -516,12 +583,9 @@ function Landing() {
               aria-hidden="true"
             >
               <div
+                ref={cubeInnerRef}
                 className="relative w-[200px] h-[200px]"
-                style={{
-                  transformStyle: 'preserve-3d',
-                  transition: 'transform 150ms ease-out',
-                  transform: `rotateX(${-18 + cubeTilt.rx}deg) rotateY(${-40 + cubeProgress * 360 + cubeTilt.ry}deg)`,
-                }}
+                style={{ transformStyle: 'preserve-3d', transform: 'rotateX(-18deg) rotateY(0deg)' }}
               >
                 {[
                   { label: 'Verified', icon: 'shield', bg: '#0f766e', rot: 0 },
@@ -556,12 +620,14 @@ function Landing() {
 
               <div className="mt-8 grid sm:grid-cols-2 gap-5">
                 {TRUST_CARDS.map((c, i) => (
-                  <Reveal key={c.title} delay={i * 80} className="lp-tilt bg-teal-800/60 border border-teal-700/60 rounded-[20px] p-5">
-                    <span className="inline-flex w-10 h-10 rounded-xl bg-teal-700/60 text-teal-100 items-center justify-center">
-                      <SvgIcon name={c.icon} className="w-5 h-5" />
-                    </span>
-                    <h3 className="mt-3 font-bold text-sm text-white">{c.title}</h3>
-                    <p className="mt-1.5 text-xs text-teal-100/80">{c.desc}</p>
+                  <Reveal key={c.title} delay={i * 80}>
+                    <TiltCard className="bg-teal-800/60 border border-teal-700/60 rounded-[20px] p-5">
+                      <span className="inline-flex w-10 h-10 rounded-xl bg-teal-700/60 text-teal-100 items-center justify-center">
+                        <SvgIcon name={c.icon} className="w-5 h-5" />
+                      </span>
+                      <h3 className="mt-3 font-bold text-sm text-white">{c.title}</h3>
+                      <p className="mt-1.5 text-xs text-teal-100/80">{c.desc}</p>
+                    </TiltCard>
                   </Reveal>
                 ))}
               </div>

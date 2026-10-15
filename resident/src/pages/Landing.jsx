@@ -31,6 +31,8 @@ const ICONS = {
   chevron: <><path d="m6 9 6 6 6-6" /></>,
   arrow: <><path d="M5 12h14M13 6l6 6-6 6" /></>,
   droplet: <><path d="M12 3s7 7.5 7 12.5A7 7 0 1 1 5 15.5C5 10.5 12 3 12 3Z" /></>,
+  shield: <><path d="M12 3 20 6v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6Z" /></>,
+  clipboard: <><rect x="6" y="4" width="12" height="17" rx="2" /><path d="M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1" /><path d="M9 11h6M9 15h4" /></>,
 };
 
 function SvgIcon({ name, className }) {
@@ -62,10 +64,10 @@ const STEPS = [
 ];
 
 const TRUST_CARDS = [
-  { icon: 'badge', title: 'Verified psychologists', desc: 'Every license is reviewed by an admin before a psychologist can take clients.' },
-  { icon: 'eyeOff', title: 'Anonymity by design', desc: 'You can reach out and talk without revealing your identity.' },
-  { icon: 'lock', title: 'Privacy for the community', desc: 'LGUs only ever see anonymized, aggregated data -- never a named resident’s record.' },
-  { icon: 'shieldCheck', title: 'Consent and data protection', desc: 'Built around the Data Privacy Act of 2012 (RA 10173).' },
+  { icon: 'shield', title: 'Verified psychologists', desc: 'Every psychologist submits a professional license that an administrator reviews before they can offer services.' },
+  { icon: 'chat', title: 'Anonymity by design', desc: 'Anonymous mode lets you reach out without the fear of being judged.' },
+  { icon: 'chart', title: 'Privacy for the community', desc: 'LGUs only see anonymized, aggregated data. Individual identities, messages, and session content are never exposed.' },
+  { icon: 'clipboard', title: 'Consent and data protection', desc: 'Built around the Data Privacy Act of 2012 (RA 10173), with consent asked before any data is shared.' },
 ];
 
 const FAQS = [
@@ -339,48 +341,60 @@ function Landing() {
         </section>
 
         {/* ===== Trust and Safety ===== */}
-        <section id="trust" className="py-24">
-          <div className="max-w-7xl mx-auto px-6 sm:px-8 grid lg:grid-cols-2 gap-16 items-center">
-            <div className="flex justify-center" style={{ perspective: '1000px' }} aria-hidden="true">
+        <section id="trust" className="relative overflow-hidden py-24 bg-teal-900 text-white">
+          <div
+            aria-hidden="true"
+            className="lp-parallax-up absolute -top-24 -left-24 w-80 h-80 rounded-full bg-teal-700/30 blur-3xl pointer-events-none"
+          />
+          <div className="max-w-7xl mx-auto px-6 sm:px-8 grid lg:grid-cols-2 gap-16 items-center relative">
+            {/* 3D cube: a real box, not flat cards -- resting at an angle so two
+                faces are always in view, spinning further as the section scrolls. */}
+            <div className="flex justify-center" style={{ perspective: '1200px' }} aria-hidden="true">
               <div className="lp-cube-rig relative w-[200px] h-[200px]" style={{ transformStyle: 'preserve-3d' }}>
                 {[
-                  { label: 'Verified', bg: '#0f766e', rot: 0 },
-                  { label: 'Anonymous', bg: '#115e59', rot: 90 },
-                  { label: 'Private', bg: '#134e4a', rot: 180 },
-                  { label: 'Consent', bg: '#0d9488', rot: 270 },
+                  { label: 'Verified', icon: 'shield', bg: '#0f766e', rot: 0 },
+                  { label: 'Anonymous', icon: 'chat', bg: '#0d9488', rot: 90 },
+                  { label: 'Private', icon: 'lock', bg: '#134e4a', rot: 180 },
+                  { label: 'Consent', icon: 'clipboard', bg: '#115e59', rot: 270 },
                 ].map((face) => (
                   <div
                     key={face.label}
-                    className="absolute inset-0 rounded-[20px] flex items-center justify-center text-white font-bold text-lg"
+                    className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white font-bold text-base border border-white/10"
                     style={{
                       background: face.bg,
                       transform: `rotateY(${face.rot}deg) translateZ(100px)`,
                       backfaceVisibility: 'hidden',
                     }}
                   >
+                    <SvgIcon name={face.icon} className="w-7 h-7 text-teal-100" />
                     {face.label}
                   </div>
                 ))}
+                {/* top cap, to read as a real box rather than four flat cards */}
+                <div
+                  className="absolute inset-0 border border-white/10"
+                  style={{ background: '#0a5048', transform: 'rotateX(90deg) translateZ(100px)', backfaceVisibility: 'hidden' }}
+                />
               </div>
             </div>
 
             <div>
-              <p className="text-xs font-semibold tracking-wide uppercase text-teal-700">Trust &amp; Safety</p>
-              <h2 className="mt-3 font-extrabold text-3xl sm:text-4xl text-slate-900">Built to be safe to use</h2>
+              <p className="text-xs font-semibold tracking-wide uppercase text-teal-300">Trust &amp; Safety</p>
+              <h2 className="mt-3 font-extrabold text-3xl sm:text-4xl text-white">Built to be safe, private, and credible</h2>
 
               <div className="mt-8 grid sm:grid-cols-2 gap-5">
                 {TRUST_CARDS.map((c, i) => (
-                  <div key={c.title} className={`lp-reveal lp-reveal-${(i % 3) + 1} lp-tilt bg-white border border-slate-100 rounded-[20px] shadow-sm p-5`}>
-                    <span className="inline-flex w-10 h-10 rounded-xl bg-teal-50 text-teal-700 items-center justify-center">
+                  <div key={c.title} className={`lp-reveal lp-reveal-${(i % 3) + 1} lp-tilt bg-teal-800/60 border border-teal-700/60 rounded-[20px] p-5`}>
+                    <span className="inline-flex w-10 h-10 rounded-xl bg-teal-700/60 text-teal-100 items-center justify-center">
                       <SvgIcon name={c.icon} className="w-5 h-5" />
                     </span>
-                    <h3 className="mt-3 font-bold text-sm text-slate-900">{c.title}</h3>
-                    <p className="mt-1.5 text-xs text-slate-600">{c.desc}</p>
+                    <h3 className="mt-3 font-bold text-sm text-white">{c.title}</h3>
+                    <p className="mt-1.5 text-xs text-teal-100/80">{c.desc}</p>
                   </div>
                 ))}
               </div>
 
-              <p className="mt-6 text-xs text-slate-500 leading-relaxed">
+              <p className="mt-6 text-xs text-teal-100/70 leading-relaxed">
                 OpenUp offers supportive guidance only. It does not provide diagnosis,
                 treatment, or emergency intervention. If you are in immediate danger, call 911.
               </p>

@@ -1239,6 +1239,31 @@ app.patch('/admin/users/:id/status', requireAuth, requireRole('admin'), async (r
   res.json(data[0]);
 });
 
+// PATCH /admin/users/:id/profile — lets an admin correct a name or reassign a
+// barangay from the Manage Users/Residents/Psychologists tables' Edit action.
+// Separate from /status above so the two concerns (who can log in vs. what
+// their record says) stay independent edits.
+app.patch('/admin/users/:id/profile', requireAuth, requireRole('admin'), async (req, res) => {
+  const { name, barangay_id } = req.body;
+  const updates = {};
+  if (name !== undefined) {
+    if (!name.trim()) return res.status(400).json({ error: 'Name cannot be empty' });
+    updates.name = name.trim();
+  }
+  if (barangay_id !== undefined) updates.barangay_id = barangay_id;
+  if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Nothing to update' });
+
+  const { data, error } = await supabase
+    .from('User')
+    .update(updates)
+    .eq('user_id', req.params.id)
+    .select('user_id, name, email, role, barangay_id, status, created_at');
+
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data || data.length === 0) return res.status(404).json({ error: 'User not found' });
+  res.json(data[0]);
+});
+
 // DELETE /admin/users/:id — permanent hard delete via delete_user_account (see
 // db/delete_user_account.sql): wipes every row referencing this account, in one
 // transaction. Voice journal audio files are removed from storage first
@@ -1920,7 +1945,7 @@ app.get('/lgu/me/residents', requireAuth, requireRole('lgu'), async (req, res) =
 
   const { data: residents, error: residentsError } = await supabase
     .from('User')
-    .select('user_id, name')
+    .select('user_id, name, email, status, created_at')
     .eq('role', 'resident')
     .eq('barangay_id', me.barangay_id)
     .order('name', { ascending: true });
@@ -1955,6 +1980,9 @@ app.get('/lgu/me/residents', requireAuth, requireRole('lgu'), async (req, res) =
     return {
       user_id: r.user_id,
       name: r.name,
+      email: r.email,
+      status: r.status,
+      created_at: r.created_at,
       last_check_in: lastCheckInByUser.get(r.user_id) || null,
       recent_mood_level: moodByResident.get(r.user_id) ?? null,
       auto_flagged: autoFlagged,

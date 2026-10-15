@@ -42,6 +42,24 @@ function SvgIcon({ name, className }) {
   return <Icon className={className}>{ICONS[name]}</Icon>;
 }
 
+// A real, verified-live 3D illustration from Microsoft's open-source (MIT
+// licensed) Fluent Emoji set -- not hand-drawn, not an inline SVG, and not a
+// guessed URL: every `path` used below was checked with a live HTTP request
+// against this CDN before being wired in here.
+const EMOJI_3D_BASE = 'https://cdn.jsdelivr.net/gh/microsoft/fluentui-emoji@main/assets';
+function Emoji3D({ path, className = '', rotate }) {
+  const src = `${EMOJI_3D_BASE}/${path.split('/').map(encodeURIComponent).join('/')}`;
+  return (
+    <img
+      src={src}
+      alt=""
+      draggable="false"
+      className={className}
+      style={rotate ? { '--pop-rotate': rotate } : undefined}
+    />
+  );
+}
+
 // ---- Scroll interactivity, driven by JS rather than CSS scroll-timelines
 // (animation-timeline: view()/scroll() has spotty browser support, which left
 // every "scroll reveal" silently inert on some browsers). IntersectionObserver
@@ -412,8 +430,11 @@ function Landing() {
             {/* 3D hero stage -- every floating piece below is a bob-animation
                 wrapper (.lp-float-*) around a hover-pop wrapper (.lp-pop), so
                 the idle float and the hover lift/zoom/tilt/glow never fight
-                over the same transform. */}
-            <div className="lp-hero-wrap relative h-[460px] hidden lg:block" aria-hidden="true">
+                over the same transform. The 3D illustrations (brain, heart,
+                faces, seedling, the health-worker figure) are real assets
+                from Microsoft's open-source Fluent Emoji 3D set (MIT
+                licensed), not hand-drawn -- verified live before use. */}
+            <div className="lp-hero-wrap relative h-[480px] hidden lg:block" aria-hidden="true">
               <div className="lp-hero-rig relative w-full h-full" style={{ transform: `rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg)` }}>
                 {/* back plate */}
                 <div
@@ -421,13 +442,20 @@ function Landing() {
                   style={{ transform: 'translateZ(-90px)' }}
                 />
 
-                {/* teal orb */}
-                <div className="lp-float-d absolute top-4 right-10 w-20 h-20" style={{ transform: 'translateZ(150px)' }}>
-                  <div className="lp-pop w-full h-full rounded-full bg-gradient-to-br from-teal-400 to-teal-700 shadow-xl" style={{ '--pop-rotate': '6deg' }} />
+                {/* floating heart badge, top-left */}
+                <div className="lp-float-e absolute left-8 top-0 w-12 h-12" style={{ transform: 'translateZ(150px)' }}>
+                  <div className="lp-pop w-full h-full rounded-full bg-white shadow-lg flex items-center justify-center" style={{ '--pop-rotate': '-8deg' }}>
+                    <Emoji3D path="Red heart/3D/red_heart_3d.png" className="w-7 h-7" />
+                  </div>
+                </div>
+
+                {/* beaming face, upper-left */}
+                <div className="lp-float-a absolute left-0 top-20 w-16 h-16" style={{ transform: 'translateZ(130px)' }}>
+                  <Emoji3D path="Beaming face with smiling eyes/3D/beaming_face_with_smiling_eyes_3d.png" className="lp-pop w-full h-full drop-shadow-xl" rotate="-6deg" />
                 </div>
 
                 {/* mood tracker card */}
-                <div className="lp-float-a absolute left-2 top-10 w-52" style={{ transform: 'translateZ(20px)' }}>
+                <div className="lp-float-a absolute left-20 top-6 w-52" style={{ transform: 'translateZ(20px)' }}>
                   <div className="lp-pop bg-white rounded-2xl shadow-xl p-4" style={{ '--pop-rotate': '-2deg' }}>
                     <p className="text-xs font-semibold text-slate-500 mb-2">This week’s mood</p>
                     <div className="flex items-end gap-1.5 h-16">
@@ -438,8 +466,47 @@ function Landing() {
                   </div>
                 </div>
 
-                {/* anonymous chat bubble */}
-                <div className="lp-float-b absolute left-16 bottom-6 w-48" style={{ transform: 'translateZ(80px)' }}>
+                {/* brain illustration, top-right */}
+                <div className="lp-float-c absolute right-2 top-0 w-16 h-16" style={{ transform: 'translateZ(145px)' }}>
+                  <Emoji3D path="Brain/3D/brain_3d.png" className="lp-pop w-full h-full drop-shadow-xl" rotate="7deg" />
+                </div>
+
+                {/* licensed psychologist card, with the health-worker figure above it */}
+                <div className="lp-float-e absolute right-6 top-12 w-44 flex flex-col items-center" style={{ transform: 'translateZ(90px)' }}>
+                  <Emoji3D path="Woman health worker/Default/3D/woman_health_worker_3d_default.png" className="lp-pop w-24 h-24 -mb-3 drop-shadow-xl" rotate="2deg" />
+                  <div className="lp-pop relative z-10 w-full bg-white rounded-2xl shadow-xl p-3" style={{ '--pop-rotate': '2deg' }}>
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full bg-green-400 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-slate-700 leading-tight">Licensed Psychologist</p>
+                        <p className="text-[10px] text-slate-500 leading-tight">Available for your support</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* small speech-bubble accent, near the psychologist */}
+                <div className="lp-float-b absolute right-48 top-24 w-9 h-9" style={{ transform: 'translateZ(160px)' }}>
+                  <div className="lp-pop w-full h-full rounded-full bg-white shadow-md flex items-center justify-center" style={{ '--pop-rotate': '-12deg' }}>
+                    <SvgIcon name="chat" className="w-4 h-4 text-teal-700" />
+                  </div>
+                </div>
+
+                {/* motivational sticky note, upper-right */}
+                <div className="lp-float-f absolute right-0 top-40 w-32" style={{ transform: 'translateZ(170px)' }}>
+                  <div className="lp-pop bg-amber-50 rounded-xl shadow-xl p-3 rotate-2" style={{ '--pop-rotate': '0deg' }}>
+                    <SvgIcon name="heart" className="w-3.5 h-3.5 text-rose-400 mb-1" />
+                    <p className="text-[10px] font-semibold text-slate-600 leading-snug">Small steps make big changes.</p>
+                  </div>
+                </div>
+
+                {/* star accent */}
+                <div className="lp-float-c absolute right-28 top-44 w-9 h-9" style={{ transform: 'translateZ(140px)' }}>
+                  <Emoji3D path="Star/3D/star_3d.png" className="lp-pop w-full h-full drop-shadow-md" rotate="14deg" />
+                </div>
+
+                {/* anonymous chat card */}
+                <div className="lp-float-b absolute left-16 bottom-10 w-48" style={{ transform: 'translateZ(80px)' }}>
                   <div className="lp-pop bg-white rounded-2xl shadow-xl p-4" style={{ '--pop-rotate': '3deg' }}>
                     <div className="flex items-center gap-2 mb-1.5">
                       <SvgIcon name="chat" className="w-4 h-4 text-teal-700" />
@@ -450,7 +517,7 @@ function Landing() {
                 </div>
 
                 {/* counseling session card */}
-                <div className="lp-float-c absolute right-2 bottom-24 w-52" style={{ transform: 'translateZ(110px)' }}>
+                <div className="lp-float-c absolute right-10 bottom-16 w-52" style={{ transform: 'translateZ(110px)' }}>
                   <div className="lp-pop bg-white rounded-2xl shadow-xl p-4" style={{ '--pop-rotate': '-3deg' }}>
                     <div className="flex items-center gap-2 mb-1.5">
                       <SvgIcon name="calendar" className="w-4 h-4 text-teal-700" />
@@ -460,50 +527,26 @@ function Landing() {
                   </div>
                 </div>
 
-                {/* licensed psychologist card */}
-                <div className="lp-float-e absolute right-0 top-28 w-48" style={{ transform: 'translateZ(60px)' }}>
-                  <div className="lp-pop bg-white rounded-2xl shadow-xl p-4" style={{ '--pop-rotate': '2deg' }}>
-                    <div className="flex items-center gap-2.5">
-                      <span className="relative w-10 h-10 rounded-full bg-gradient-to-br from-teal-400 to-teal-700 flex items-center justify-center shrink-0">
-                        <SvgIcon name="shieldCheck" className="w-5 h-5 text-white" />
-                        <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-green-400 border-2 border-white" />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold text-slate-700 leading-tight">Licensed Psychologist</p>
-                        <p className="text-[10px] text-slate-500 leading-tight">Available for your support</p>
-                      </div>
-                    </div>
+                {/* speech-bubble dots accent, bottom-center */}
+                <div className="lp-float-d absolute left-52 bottom-12 w-12 h-12" style={{ transform: 'translateZ(100px)' }}>
+                  <Emoji3D path="Speech balloon/3D/speech_balloon_3d.png" className="lp-pop w-full h-full drop-shadow-lg" rotate="-5deg" />
+                </div>
+
+                {/* brain in a circle, bottom-left */}
+                <div className="lp-float-a absolute left-20 bottom-0 w-20 h-20" style={{ transform: 'translateZ(120px)' }}>
+                  <div className="lp-pop w-full h-full rounded-full bg-teal-50 shadow-lg flex items-center justify-center p-3" style={{ '--pop-rotate': '-4deg' }}>
+                    <Emoji3D path="Brain/3D/brain_3d.png" className="w-full h-full" />
                   </div>
                 </div>
 
-                {/* motivational sticky note */}
-                <div className="lp-float-f absolute left-0 bottom-0 w-36" style={{ transform: 'translateZ(130px)' }}>
-                  <div className="lp-pop bg-amber-50 rounded-xl shadow-xl p-3.5 -rotate-3" style={{ '--pop-rotate': '0deg' }}>
-                    <SvgIcon name="heart" className="w-4 h-4 text-rose-400 mb-1.5" />
-                    <p className="text-[11px] font-semibold text-slate-600 leading-snug">Small steps make big changes.</p>
-                  </div>
+                {/* pensive face, bottom-right-center */}
+                <div className="lp-float-b absolute right-28 bottom-2 w-16 h-16" style={{ transform: 'translateZ(95px)' }}>
+                  <Emoji3D path="Pensive face/3D/pensive_face_3d.png" className="lp-pop w-full h-full drop-shadow-xl" rotate="9deg" />
                 </div>
 
-                {/* floating heart badge */}
-                <div className="lp-float-e absolute left-36 top-0 w-10 h-10" style={{ transform: 'translateZ(170px)' }}>
-                  <div className="lp-pop w-10 h-10 rounded-full bg-white shadow-lg flex items-center justify-center" style={{ '--pop-rotate': '-8deg' }}>
-                    <SvgIcon name="heart" className="w-4.5 h-4.5 text-rose-400" />
-                  </div>
-                </div>
-
-                {/* floating star accent */}
-                <div className="lp-float-c absolute right-24 top-6 w-9 h-9" style={{ transform: 'translateZ(140px)' }}>
-                  <div className="lp-pop w-9 h-9 rounded-full bg-amber-100 shadow-md flex items-center justify-center" style={{ '--pop-rotate': '10deg' }}>
-                    <SvgIcon name="star" className="w-4 h-4 text-amber-500" />
-                  </div>
-                </div>
-
-                {/* happy + calm mood emoji */}
-                <div className="lp-float-a absolute left-44 top-36 text-2xl select-none" style={{ transform: 'translateZ(100px)' }}>
-                  <span className="lp-pop inline-block" style={{ '--pop-rotate': '-10deg' }}>😊</span>
-                </div>
-                <div className="lp-float-b absolute right-40 bottom-4 text-2xl select-none" style={{ transform: 'translateZ(95px)' }}>
-                  <span className="lp-pop inline-block" style={{ '--pop-rotate': '8deg' }}>😌</span>
+                {/* seedling, bottom-right corner */}
+                <div className="lp-float-f absolute right-0 bottom-0 w-12 h-12" style={{ transform: 'translateZ(135px)' }}>
+                  <Emoji3D path="Seedling/3D/seedling_3d.png" className="lp-pop w-full h-full drop-shadow-lg" rotate="-10deg" />
                 </div>
               </div>
             </div>

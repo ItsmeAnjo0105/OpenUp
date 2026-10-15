@@ -271,9 +271,10 @@ app.get('/psychologists', async (req, res) => {
 });
 
 // GET /resources?search=... — public read (residents view/search); file_url resolves
-// the storage path the same way psychologist photos do.
+// the storage path the same way psychologist photos do. Only published resources --
+// a draft an admin hasn't published yet never reaches residents.
 app.get('/resources', async (req, res) => {
-  let query = supabase.from('Resource').select('*').order('created_at', { ascending: false });
+  let query = supabase.from('Resource').select('*').eq('is_published', true).order('created_at', { ascending: false });
 
   const { search } = req.query;
   if (search) query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%`);
@@ -285,6 +286,74 @@ app.get('/resources', async (req, res) => {
     ...r,
     file_url: supabase.storage.from('resources').getPublicUrl(r.file_path).data.publicUrl,
   })));
+});
+
+// GET /admin/resources — every resource, published or draft (the admin-facing
+// list; residents only ever see published ones via GET /resources above).
+app.get('/admin/resources', requireAuth, requireRole('admin'), async (req, res) => {
+  const { data, error } = await supabase.from('Resource').select('*').order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+
+  res.json(data.map((r) => ({
+    ...r,
+    file_url: supabase.storage.from('resources').getPublicUrl(r.file_path).data.publicUrl,
+  })));
+});
+
+// POST /admin/resources — multipart: file + title, description, category.
+// New resources default to unpublished (is_published=false) so "Publish
+// Resource" is a real, distinct action from "Add Resource", not a no-op.
+app.post('/admin/resources', requireAuth, requireRole('admin'), upload.single('file'), async (req, res) => {
+  const { title, description, category } = req.body;
+  if (!title || !req.file) return res.status(400).json({ error: 'title and file are required' });
+
+  const filePath = `${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`;
+  const { error: uploadError } = await supabase.storage
+    .from('resources')
+    .upload(filePath, req.file.buffer, { contentType: req.file.mimetype });
+  if (uploadError) return res.status(500).json({ error: uploadError.message });
+
+  const { data, error } = await supabase
+    .from('Resource')
+    .insert([{ title, description: description || null, category: category || null, file_path: filePath, is_published: false }])
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data[0]);
+});
+
+// PATCH /admin/resources/:id — body: any of { title, description, category,
+// is_published }. Used for both editing metadata and the Publish/Unpublish toggle.
+app.patch('/admin/resources/:id', requireAuth, requireRole('admin'), async (req, res) => {
+  const { title, description, category, is_published } = req.body;
+  const updates = {};
+  if (title !== undefined) updates.title = title;
+  if (description !== undefined) updates.description = description;
+  if (category !== undefined) updates.category = category;
+  if (is_published !== undefined) updates.is_published = is_published;
+  if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Nothing to update' });
+
+  const { data, error } = await supabase.from('Resource').update(updates).eq('resource_id', req.params.id).select();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data || data.length === 0) return res.status(404).json({ error: 'Resource not found' });
+  res.json(data[0]);
+});
+
+// DELETE /admin/resources/:id — removes the row and its storage file.
+app.delete('/admin/resources/:id', requireAuth, requireRole('admin'), async (req, res) => {
+  const { data: existing, error: findError } = await supabase
+    .from('Resource').select('file_path').eq('resource_id', req.params.id).single();
+  if (findError || !existing) return res.status(404).json({ error: 'Resource not found' });
+
+  const { error } = await supabase.from('Resource').delete().eq('resource_id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+
+  try {
+    await supabase.storage.from('resources').remove([existing.file_path]);
+  } catch {
+    // best-effort -- the row is already gone either way
+  }
+  res.json({ deleted: true });
 });
 
 // Community Testimonials: public read, resident-authored, ownership-checked edit/delete.
@@ -538,6 +607,67 @@ app.post('/admin/announcements', requireAuth, requireRole('admin'), async (req, 
   }
 
   res.status(201).json(announcement[0]);
+});
+
+// GET /platform-status — public, used to decide whether to show the
+// maintenance banner. Deliberately tiny and unauthenticated: every page
+// needs this before anyone has logged in.
+app.get('/platform-status', async (req, res) => {
+  const { data, error } = await supabase.from('Platform_Setting').select('key, value');
+  if (error) return res.status(500).json({ error: error.message });
+  const byKey = Object.fromEntries(data.map((s) => [s.key, s.value]));
+  res.json({
+    maintenance_mode: byKey.maintenance_mode === 'true',
+    platform_name: byKey.platform_name || 'OpenUp',
+  });
+});
+
+// System Settings / "Manage Configurations" -- a generic key-value store.
+app.get('/admin/settings', requireAuth, requireRole('admin'), async (req, res) => {
+  const { data, error } = await supabase.from('Platform_Setting').select('*').order('key', { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.patch('/admin/settings/:key', requireAuth, requireRole('admin'), async (req, res) => {
+  const { value } = req.body;
+  if (value === undefined) return res.status(400).json({ error: 'value is required' });
+
+  const { data, error } = await supabase
+    .from('Platform_Setting')
+    .update({ value: String(value), updated_at: new Date().toISOString() })
+    .eq('key', req.params.key)
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data || data.length === 0) return res.status(404).json({ error: 'Setting not found' });
+  res.json(data[0]);
+});
+
+// System Settings / "Backup & Maintenance" -- a real export of platform-wide
+// AGGREGATE counts (never raw resident records) for the admin's own
+// record-keeping. Not a substitute for Supabase's own infrastructure-level
+// backups, which this app doesn't control and shouldn't claim to replace.
+app.get('/admin/backup-snapshot', requireAuth, requireRole('admin'), async (req, res) => {
+  const [users, bookings, payments, barangays, resources] = await Promise.all([
+    supabase.from('User').select('role', { count: 'exact', head: true }),
+    supabase.from('Booking').select('status', { count: 'exact', head: true }),
+    supabase.from('Payment').select('amount, platform_fee, psychologist_payout, status'),
+    supabase.from('Barangay').select('barangay_id', { count: 'exact', head: true }),
+    supabase.from('Resource').select('resource_id', { count: 'exact', head: true }),
+  ]);
+
+  const paidPayments = (payments.data || []).filter((p) => p.status === 'paid');
+
+  res.json({
+    generated_at: new Date().toISOString(),
+    total_users: users.count || 0,
+    total_bookings: bookings.count || 0,
+    total_barangays: barangays.count || 0,
+    total_resources: resources.count || 0,
+    payments_collected: paidPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0),
+    platform_fees_collected: paidPayments.reduce((sum, p) => sum + Number(p.platform_fee || 0), 0),
+  });
 });
 
 // GET /psychologists/me — the logged-in psychologist's own profile, regardless of
@@ -3280,6 +3410,67 @@ app.get('/admin/accomplishment-report', requireAuth, requireRole('admin'), async
   }));
 });
 
+// GET /admin/platform-report — "Reports & Analytics": platform-WIDE trends,
+// not per-barangay like Accomplishment Report above. Last 12 months of real
+// signups and sessions, plus a real payments summary.
+app.get('/admin/platform-report', requireAuth, requireRole('admin'), async (req, res) => {
+  const [usersRes, bookingsRes, paymentsRes] = await Promise.all([
+    supabase.from('User').select('role, created_at'),
+    supabase.from('Booking').select('status, schedule'),
+    supabase.from('Payment').select('amount, platform_fee, psychologist_payout, status, created_at'),
+  ]);
+  if (usersRes.error) return res.status(500).json({ error: usersRes.error.message });
+  if (bookingsRes.error) return res.status(500).json({ error: bookingsRes.error.message });
+  if (paymentsRes.error) return res.status(500).json({ error: paymentsRes.error.message });
+
+  const months = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() - i);
+    months.push({ year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleDateString('en-PH', { month: 'short', year: '2-digit' }) });
+  }
+  const monthKey = (dateStr) => {
+    const d = new Date(dateStr);
+    return `${d.getFullYear()}-${d.getMonth()}`;
+  };
+
+  const signupsByMonth = months.map((m) => {
+    const key = `${m.year}-${m.month}`;
+    const inMonth = usersRes.data.filter((u) => monthKey(u.created_at) === key);
+    return {
+      label: m.label,
+      residents: inMonth.filter((u) => u.role === 'resident').length,
+      psychologists: inMonth.filter((u) => u.role === 'psychologist').length,
+    };
+  });
+
+  const sessionsByMonth = months.map((m) => {
+    const key = `${m.year}-${m.month}`;
+    const inMonth = bookingsRes.data.filter((b) => monthKey(b.schedule) === key);
+    return {
+      label: m.label,
+      confirmed: inMonth.filter((b) => b.status === 'confirmed').length,
+      pending: inMonth.filter((b) => b.status === 'pending').length,
+      cancelled: inMonth.filter((b) => b.status === 'cancelled' || b.status === 'declined').length,
+    };
+  });
+
+  const paidPayments = paymentsRes.data.filter((p) => p.status === 'paid');
+
+  res.json({
+    signups_by_month: signupsByMonth,
+    sessions_by_month: sessionsByMonth,
+    payments: {
+      total_collected: paidPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0),
+      platform_fees: paidPayments.reduce((sum, p) => sum + Number(p.platform_fee || 0), 0),
+      psychologist_payouts: paidPayments.reduce((sum, p) => sum + Number(p.psychologist_payout || 0), 0),
+      pending_count: paymentsRes.data.filter((p) => p.status === 'pending').length,
+      paid_count: paidPayments.length,
+    },
+  });
+});
+
 // GET /jitsi-token/:bookingId?name=Joan&role=resident
 app.get('/jitsi-token/:bookingId', (req, res) => {
   const { bookingId } = req.params;
@@ -3651,12 +3842,36 @@ app.get('/auth/me', requireAuth, (req, res) => {
   res.json({ user: req.user });
 });
 
+// Fallback only -- the real, admin-editable list lives in Crisis_Escalation_Rule
+// (see db/admin_platform_features.sql, seeded with this exact list). Detection
+// falls back to this hardcoded copy if that table is ever empty or unreachable,
+// so a DB hiccup can never silently disable crisis detection.
 const CRISIS_PHRASES = [
   'kill myself', 'want to die', 'end my life', 'better off without me',
   'no reason to live', "can't go on", 'suicide', 'hurting myself',
   'self harm', 'end it all', "don't want to be here anymore",
   'no point in living',
 ];
+
+let crisisPhrasesCache = { phrases: null, loadedAt: 0 };
+const CRISIS_PHRASES_CACHE_MS = 60 * 1000;
+
+async function getCrisisPhrases() {
+  const now = Date.now();
+  if (crisisPhrasesCache.phrases && now - crisisPhrasesCache.loadedAt < CRISIS_PHRASES_CACHE_MS) {
+    return crisisPhrasesCache.phrases;
+  }
+  try {
+    const { data, error } = await supabase.from('Crisis_Escalation_Rule').select('phrase');
+    if (!error && data && data.length > 0) {
+      crisisPhrasesCache = { phrases: data.map((d) => d.phrase.toLowerCase()), loadedAt: now };
+      return crisisPhrasesCache.phrases;
+    }
+  } catch {
+    // fall through to the hardcoded default below
+  }
+  return CRISIS_PHRASES;
+}
 
 const emotionReflections = {
   sadness: "It sounds like you're carrying something heavy right now. These feelings are real, and they matter.",
@@ -3668,10 +3883,85 @@ const emotionReflections = {
   neutral: "Thanks for sharing what's on your mind today.",
 };
 
-function detectCrisisRisk(transcript) {
+async function detectCrisisRisk(transcript) {
+  const phrases = await getCrisisPhrases();
   const lower = transcript.toLowerCase();
-  return CRISIS_PHRASES.some((phrase) => lower.includes(phrase));
+  return phrases.some((phrase) => lower.includes(phrase));
 }
+
+// AI Crisis Management / "Configure Escalation Rules" -- the admin-editable
+// crisis-detection keyword list detectCrisisRisk() actually reads from.
+app.get('/admin/escalation-rules', requireAuth, requireRole('admin'), async (req, res) => {
+  const { data, error } = await supabase.from('Crisis_Escalation_Rule').select('*').order('phrase', { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/admin/escalation-rules', requireAuth, requireRole('admin'), async (req, res) => {
+  const { phrase } = req.body;
+  if (!phrase || !phrase.trim()) return res.status(400).json({ error: 'phrase is required' });
+
+  const { data, error } = await supabase
+    .from('Crisis_Escalation_Rule')
+    .insert([{ phrase: phrase.trim().toLowerCase() }])
+    .select();
+
+  if (error) {
+    if (error.code === '23505') return res.status(409).json({ error: 'This phrase is already in the list' });
+    return res.status(500).json({ error: error.message });
+  }
+  crisisPhrasesCache.loadedAt = 0; // force a refresh on the next check
+  res.status(201).json(data[0]);
+});
+
+app.delete('/admin/escalation-rules/:id', requireAuth, requireRole('admin'), async (req, res) => {
+  const { error } = await supabase.from('Crisis_Escalation_Rule').delete().eq('rule_id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  crisisPhrasesCache.loadedAt = 0;
+  res.json({ deleted: true });
+});
+
+// AI Crisis Management / "Manage Emergency Contacts" -- real, admin-verified
+// numbers shown to a resident in crisis instead of a placeholder. GET is
+// public (the Crisis Companion needs it unauthenticated); writes are admin-only.
+app.get('/emergency-contacts', async (req, res) => {
+  const { data, error } = await supabase.from('Emergency_Contact').select('*').order('created_at', { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/admin/emergency-contacts', requireAuth, requireRole('admin'), async (req, res) => {
+  const { name, phone, description } = req.body;
+  if (!name || !phone) return res.status(400).json({ error: 'name and phone are required' });
+
+  const { data, error } = await supabase
+    .from('Emergency_Contact')
+    .insert([{ name, phone, description: description || null }])
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data[0]);
+});
+
+app.patch('/admin/emergency-contacts/:id', requireAuth, requireRole('admin'), async (req, res) => {
+  const { name, phone, description } = req.body;
+  const updates = {};
+  if (name !== undefined) updates.name = name;
+  if (phone !== undefined) updates.phone = phone;
+  if (description !== undefined) updates.description = description;
+  if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Nothing to update' });
+
+  const { data, error } = await supabase.from('Emergency_Contact').update(updates).eq('contact_id', req.params.id).select();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data || data.length === 0) return res.status(404).json({ error: 'Contact not found' });
+  res.json(data[0]);
+});
+
+app.delete('/admin/emergency-contacts/:id', requireAuth, requireRole('admin'), async (req, res) => {
+  const { error } = await supabase.from('Emergency_Contact').delete().eq('contact_id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ deleted: true });
+});
 
 async function generateLLMReflection(transcript) {
   const prompt = `Write a short, warm, two-sentence reflection acknowledging the feelings in this personal journal entry. Do not give advice. Do not diagnose. Just reflect what they seem to be feeling: "${transcript}"`;
@@ -3763,7 +4053,7 @@ app.post('/voice-journal', upload.single('audio'), async (req, res) => {
     const contentIndicators = sorted.slice(0, 2).map((e) => e.label);
 
     // Step 3: Crisis check (deterministic — never left to the LLM) + reflection generation
-    const isCrisis = detectCrisisRisk(transcript);
+    const isCrisis = await detectCrisisRisk(transcript);
 
     let reflectionBase;
     try {
@@ -3940,7 +4230,7 @@ app.post('/crisis-companion/chat', async (req, res) => {
 
   if (!message) return res.status(400).json({ error: 'message is required' });
 
-  const isCrisis = detectCrisisRisk(message);
+  const isCrisis = await detectCrisisRisk(message);
 
   // Feeds the AI Effectiveness Tracker's detection rate -- never the message
   // itself, just whether this turn tripped the check. Best-effort: a logging

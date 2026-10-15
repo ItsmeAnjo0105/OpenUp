@@ -13,6 +13,7 @@ function CrisisCompanion() {
   const [matching, setMatching] = useState(false);
   const [crisisStatus, setCrisisStatus] = useState(null);
   const [contacts, setContacts] = useState([]);
+  const [emergencyContacts, setEmergencyContacts] = useState([]);
   const [alertedIds, setAlertedIds] = useState([]);
   const [alertError, setAlertError] = useState('');
   const [rating, setRating] = useState(null);
@@ -30,6 +31,10 @@ function CrisisCompanion() {
     fetch(`${API_URL}/trusted-contacts`, { headers: authHeader() })
       .then((res) => res.json())
       .then((data) => { if (Array.isArray(data)) setContacts(data); })
+      .catch(() => {});
+    fetch(`${API_URL}/emergency-contacts`)
+      .then((res) => res.json())
+      .then((data) => { if (Array.isArray(data)) setEmergencyContacts(data); })
       .catch(() => {});
   }, [crisisDetected]);
 
@@ -130,10 +135,25 @@ function CrisisCompanion() {
               licensed psychologist can help.
             </p>
             {crisisStatus === 'queued' ? (
-              <p className="text-sm text-purple-900">
-                No one is free this exact moment, but you're first in line. If you need help right
-                now, please call [YOUR VERIFIED CRISIS HOTLINE NUMBER HERE].
-              </p>
+              <div className="text-sm text-purple-900">
+                <p>No one is free this exact moment, but you're first in line.</p>
+                {emergencyContacts.length > 0 ? (
+                  <div className="mt-3 space-y-1.5">
+                    <p className="font-medium">If you need help right now:</p>
+                    {emergencyContacts.map((c) => (
+                      <p key={c.contact_id}>
+                        {c.name}: <a href={`tel:${c.phone}`} className="underline font-medium">{c.phone}</a>
+                        {c.description && <span className="text-purple-900/70"> -- {c.description}</span>}
+                      </p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-purple-900/70">
+                    No verified crisis hotline is configured yet. Please contact your nearest hospital
+                    or barangay emergency services directly.
+                  </p>
+                )}
+              </div>
             ) : (
               <button
                 onClick={handleCrisisMatch}

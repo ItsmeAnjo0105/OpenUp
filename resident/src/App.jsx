@@ -1,4 +1,5 @@
 import { Routes, Route } from 'react-router-dom';
+import MaintenanceBanner from './components/MaintenanceBanner';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
@@ -57,7 +58,9 @@ import Notifications from './pages/Notifications';
 
 function App() {
   return (
-    <Routes>
+    <>
+      <MaintenanceBanner />
+      <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
@@ -113,7 +116,8 @@ function App() {
       <Route path="/resources" element={<Resources />} />
       <Route path="/community" element={<Community />} />
       <Route path="/notifications" element={<Notifications />} />
-    </Routes>
+      </Routes>
+    </>
   );
 }
 

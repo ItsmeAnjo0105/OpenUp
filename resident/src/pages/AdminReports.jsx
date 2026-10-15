@@ -1,9 +1,36 @@
 import { useEffect, useState } from 'react';
-import { IconReportAnalytics, IconDownload } from '@tabler/icons-react';
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer } from 'recharts';
+import { IconReportAnalytics, IconDownload, IconChartBar } from '@tabler/icons-react';
 import AdminLayout from '../components/AdminLayout';
 import AdminTopBar from '../components/AdminTopBar';
 import { API_URL, authHeader } from '../config';
 import { playHover, playClick } from '../utils/sound';
+
+function downloadPlatformReportCsv(report) {
+  const rows = [
+    ['Month', 'Resident Signups', 'Psychologist Signups', 'Sessions Confirmed', 'Sessions Pending', 'Sessions Cancelled'],
+    ...report.signups_by_month.map((s, i) => [
+      s.label, s.residents, s.psychologists,
+      report.sessions_by_month[i].confirmed, report.sessions_by_month[i].pending, report.sessions_by_month[i].cancelled,
+    ]),
+    [],
+    ['Total collected (PHP)', report.payments.total_collected],
+    ['Platform fees (PHP)', report.payments.platform_fees],
+    ['Psychologist payouts (PHP)', report.payments.psychologist_payouts],
+    ['Paid payments', report.payments.paid_count],
+    ['Pending payments', report.payments.pending_count],
+  ];
+  const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `openup-platform-report-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 function downloadAccomplishmentCsv(rows) {
   const header = ['Barangay', 'City', 'Residents', 'Sessions Requested', 'Sessions Confirmed', 'Care Credits Issued (PHP)', 'Care Credits Used (PHP)', 'Budget Funded (PHP)', 'Budget Spent (PHP)', 'Budget Remaining (PHP)'];
@@ -41,12 +68,24 @@ const HEATMAP_RANGES = [
 ];
 
 function AdminReports() {
+  const [platformReport, setPlatformReport] = useState(null);
+  const [platformError, setPlatformError] = useState('');
   const [accReport, setAccReport] = useState([]);
   const [accError, setAccError] = useState('');
   const [accBarangayId, setAccBarangayId] = useState('');
   const [heatmap, setHeatmap] = useState([]);
   const [heatmapError, setHeatmapError] = useState('');
   const [heatmapRange, setHeatmapRange] = useState('week');
+
+  const loadPlatform = () => {
+    fetch(`${API_URL}/admin/platform-report`, { headers: authHeader() })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (ok) setPlatformReport(data);
+        else setPlatformError(data?.error || 'Could not load the platform report.');
+      })
+      .catch(() => setPlatformError('Could not reach the server.'));
+  };
 
   const loadAcc = () => {
     fetch(`${API_URL}/admin/accomplishment-report`, { headers: authHeader() })
@@ -68,7 +107,7 @@ function AdminReports() {
       .catch(() => setHeatmapError('Could not reach the server.'));
   };
 
-  useEffect(() => { loadAcc(); loadHeatmap('week'); }, []);
+  useEffect(() => { loadPlatform(); loadAcc(); loadHeatmap('week'); }, []);
 
   const changeHeatmapRange = (range) => {
     setHeatmapRange(range);
@@ -87,7 +126,76 @@ function AdminReports() {
         <AdminTopBar />
       </div>
 
-      <div className="bg-brand-surface rounded-2xl shadow-sm p-6 mt-6 mb-6">
+      {platformError && <p className="text-sm text-red-600 mb-4 mt-4">{platformError}</p>}
+
+      {platformReport && (
+        <div className="bg-brand-surface rounded-2xl shadow-sm p-6 mt-6 mb-6">
+          <div className="flex items-center justify-between gap-3 mb-1">
+            <h2 className="font-display text-base font-semibold flex items-center gap-1.5">
+              <IconChartBar size={16} className="text-brand-primary" /> Platform analytics
+            </h2>
+            <button
+              onClick={() => { playClick(); downloadPlatformReportCsv(platformReport); }}
+              onMouseEnter={playHover}
+              className="interactive flex items-center gap-1.5 text-xs font-medium px-3.5 py-1.5 rounded-full bg-brand-primary text-white"
+            >
+              <IconDownload size={14} /> Export data
+            </button>
+          </div>
+          <p className="text-xs text-brand-ink/50 mb-4">Platform-wide trends, last 12 months -- not per-barangay (see Accomplishment report below for that).</p>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
+            <div>
+              <p className="text-xs text-brand-ink/50">Total collected</p>
+              <p className="text-xl font-semibold mt-0.5">₱{platformReport.payments.total_collected.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-xs text-brand-ink/50">Platform fees</p>
+              <p className="text-xl font-semibold mt-0.5">₱{platformReport.payments.platform_fees.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-xs text-brand-ink/50">Psychologist payouts</p>
+              <p className="text-xl font-semibold mt-0.5">₱{platformReport.payments.psychologist_payouts.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-xs text-brand-ink/50">Paid / Pending</p>
+              <p className="text-xl font-semibold mt-0.5">{platformReport.payments.paid_count} / {platformReport.payments.pending_count}</p>
+            </div>
+          </div>
+
+          <p className="text-xs font-medium text-brand-ink/60 mb-2">Signups per month</p>
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={platformReport.signups_by_month}>
+              <XAxis dataKey="label" axisLine={false} tickLine={false} fontSize={11} />
+              <YAxis axisLine={false} tickLine={false} fontSize={11} width={24} allowDecimals={false} />
+              <Bar dataKey="residents" stackId="a" fill="#2F5D50" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="psychologists" stackId="a" fill="#5ED6A3" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+          <div className="flex items-center gap-4 mt-2 mb-5 text-xs text-brand-ink/50">
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-brand-primary" /> Residents</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: '#5ED6A3' }} /> Psychologists</span>
+          </div>
+
+          <p className="text-xs font-medium text-brand-ink/60 mb-2">Sessions per month</p>
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={platformReport.sessions_by_month}>
+              <XAxis dataKey="label" axisLine={false} tickLine={false} fontSize={11} />
+              <YAxis axisLine={false} tickLine={false} fontSize={11} width={24} allowDecimals={false} />
+              <Bar dataKey="confirmed" stackId="a" fill="#2F5D50" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="pending" stackId="a" fill="#E8A33D" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="cancelled" stackId="a" fill="#D9534F" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+          <div className="flex items-center gap-4 mt-2 text-xs text-brand-ink/50">
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-brand-primary" /> Confirmed</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: '#E8A33D' }} /> Pending</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: '#D9534F' }} /> Cancelled/Declined</span>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-brand-surface rounded-2xl shadow-sm p-6 mb-6">
         <div className="flex items-center justify-between gap-3 mb-1">
           <h2 className="font-display text-base font-semibold">Accomplishment report</h2>
           <button

@@ -548,6 +548,20 @@ async function getOwnPsychologistId(userId) {
   return data?.psychologist_id || null;
 }
 
+// A barangay may not have an LGU account provisioned yet -- callers that
+// notify one must handle null and simply skip, not fail the real action
+// (an assessment, an escalation, a subscription change) that triggered it.
+async function getLguUserIdForBarangay(barangayId) {
+  if (!barangayId) return null;
+  const { data } = await supabase
+    .from('User')
+    .select('user_id')
+    .eq('role', 'lgu')
+    .eq('barangay_id', barangayId)
+    .maybeSingle();
+  return data?.user_id || null;
+}
+
 // Same masking scheme the Dashboard's frontend already uses for its
 // today's-sessions table -- kept here too for the Reports endpoint, which is
 // a bulk/exportable view rather than a specific-client lookup (My Clients
@@ -3043,6 +3057,20 @@ app.post('/admin/subscriptions/:barangayId', requireAuth, requireRole('admin'), 
     .select();
 
   if (error) return res.status(500).json({ error: error.message });
+
+  // Best-effort: the subscription change already succeeded either way.
+  const lguUserId = await getLguUserIdForBarangay(req.params.barangayId);
+  if (lguUserId) {
+    await supabase.from('Notification').insert([{
+      user_id: lguUserId,
+      type: 'system',
+      title: 'Subscription updated',
+      body: `Your barangay's subscription is now ${status}.`,
+      link: '/lgu/funding',
+      read: false,
+    }]);
+  }
+
   res.json(data[0]);
 });
 
@@ -3740,6 +3768,27 @@ app.get('/voice-journal/user/:userId', async (req, res) => {
 // (auto-confirmed, no waiting on accept), or queues the resident in Crisis_Requests if
 // nobody's free right now. Returns the same shape both callers need.
 async function escalateCrisis(userId) {
+  // Best-effort, fire-and-forget: a notification failure must never block a
+  // real crisis escalation. Covers both outcomes below.
+  const notifyLgu = async (title, body) => {
+    try {
+      const { data: resident } = await supabase.from('User').select('name, barangay_id').eq('user_id', userId).single();
+      const lguUserId = resident ? await getLguUserIdForBarangay(resident.barangay_id) : null;
+      if (lguUserId) {
+        await supabase.from('Notification').insert([{
+          user_id: lguUserId,
+          type: 'system',
+          title,
+          body: body(resident.name),
+          link: '/lgu/residents',
+          read: false,
+        }]);
+      }
+    } catch {
+      // never block the real escalation on a notification failure
+    }
+  };
+
   const { data: available, error: findError } = await supabase
     .from('Psychologist')
     .select('psychologist_id, session_price')
@@ -3756,6 +3805,7 @@ async function escalateCrisis(userId) {
       .select();
 
     if (queueError) throw queueError;
+    notifyLgu('Crisis escalation queued', (name) => `${name} tried to escalate to a psychologist, but nobody was available -- they're queued.`);
     return { matched: false, queued: queued[0] };
   }
 
@@ -3772,6 +3822,7 @@ async function escalateCrisis(userId) {
   if (error) throw error;
 
   await supabase.from('Psychologist').update({ is_available: false }).eq('psychologist_id', psychologistId);
+  notifyLgu('Crisis escalation matched', (name) => `${name} was just matched with a psychologist after a crisis escalation.`);
 
   return { matched: true, booking: data.booking };
 }
@@ -3968,6 +4019,27 @@ app.post('/assessment', async (req, res) => {
   // record of a real action, not a fabricated "agreed to terms" event.
   // Best-effort: the assessment itself is already saved either way.
   supabase.from('Consent_Record').insert([{ user_id, consent_type: 'assessment' }]).then(() => {});
+
+  // Alerts the resident's own barangay LGU account (if one exists) when a
+  // check-in raises a real safety concern -- real names, same as the rest of
+  // the LGU's resident-facing views (Manage Residents, etc.), since this IS
+  // the local government responsible for this specific named resident.
+  if (safetyFlag) {
+    (async () => {
+      const { data: resident } = await supabase.from('User').select('name, barangay_id').eq('user_id', user_id).single();
+      const lguUserId = resident ? await getLguUserIdForBarangay(resident.barangay_id) : null;
+      if (lguUserId) {
+        await supabase.from('Notification').insert([{
+          user_id: lguUserId,
+          type: 'system',
+          title: 'Safety concern flagged',
+          body: `${resident.name}'s latest check-in flagged a possible safety concern.`,
+          link: '/lgu/residents',
+          read: false,
+        }]);
+      }
+    })();
+  }
 
   res.status(201).json({
     ...data[0],

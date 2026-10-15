@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { IconBell, IconChevronDown, IconLogout } from '@tabler/icons-react';
+import { IconBell, IconChevronDown, IconLogout, IconUserCircle } from '@tabler/icons-react';
 import { API_URL, authHeader, getStoredUser } from '../config';
 import { playHover, playClick } from '../utils/sound';
 
-// Mirrors PsychologistTopBar's bell + account dropdown. No Profile link --
-// there's no LGU-facing profile page yet.
+// Mirrors PsychologistTopBar's bell + account dropdown.
 function LguTopBar() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -55,6 +54,14 @@ function LguTopBar() {
           <>
             <div className="fixed inset-0 z-10" onClick={() => setAccountMenuOpen(false)} />
             <div className="absolute right-0 mt-1 w-40 bg-brand-surface rounded-xl shadow-md py-1 z-20" style={{ border: '1px solid rgba(28,36,32,0.08)' }}>
+              <Link
+                to="/lgu/profile"
+                onMouseEnter={playHover}
+                onClick={() => { playClick(); setAccountMenuOpen(false); }}
+                className="interactive-nav flex items-center gap-2 px-3 py-2 text-sm text-brand-ink/70 hover:bg-brand-ink/5"
+              >
+                <IconUserCircle size={15} /> Profile
+              </Link>
               <button
                 onClick={() => { playClick(); handleLogout(); }}
                 onMouseEnter={playHover}

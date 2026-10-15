@@ -136,15 +136,26 @@ function LguSidebar({ user, sidebarOpen, setSidebarOpen }) {
 
       <div className="relative px-3 py-4 mt-1 shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
         {collapsed ? (
-          <div className="flex justify-center mb-2">
+          <Link
+            to="/lgu/profile"
+            onMouseEnter={playHover}
+            onClick={playClick}
+            className="interactive flex justify-center mb-2"
+            title="Profile"
+          >
             <span className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-xs font-semibold">
               {initials}
             </span>
-          </div>
+          </Link>
         ) : (
           <>
             <p className="px-1 text-[10px] font-semibold uppercase tracking-wider text-white/30 mb-2">Account</p>
-            <div className="flex items-center gap-2.5 px-1 mb-3 min-w-0">
+            <Link
+              to="/lgu/profile"
+              onMouseEnter={playHover}
+              onClick={playClick}
+              className="interactive-nav flex items-center gap-2.5 px-1 py-1 -mx-1 mb-3 min-w-0 rounded-xl hover:bg-white/5"
+            >
               <span className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-xs font-semibold shrink-0">
                 {initials}
               </span>
@@ -152,7 +163,7 @@ function LguSidebar({ user, sidebarOpen, setSidebarOpen }) {
                 <p className="text-sm font-medium truncate">{user.name}</p>
                 <p className="text-[11px] text-white/50 truncate">LGU / Barangay</p>
               </div>
-            </div>
+            </Link>
           </>
         )}
         <button

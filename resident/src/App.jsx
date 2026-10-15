@@ -34,6 +34,7 @@ import LguResourceAllocation from './pages/LguResourceAllocation';
 import LguWellnessIndex from './pages/LguWellnessIndex';
 import LguDataGovernance from './pages/LguDataGovernance';
 import LguPsychologistDirectory from './pages/LguPsychologistDirectory';
+import LguProfile from './pages/LguProfile';
 import AnonymousChat from './pages/AnonymousChat';
 import PaymentResult from './pages/PaymentResult';
 import Profile from './pages/Profile';
@@ -79,6 +80,7 @@ function App() {
       <Route path="/lgu/wellness-index" element={<LguWellnessIndex />} />
       <Route path="/lgu/data-governance" element={<LguDataGovernance />} />
       <Route path="/lgu/psychologists" element={<LguPsychologistDirectory />} />
+      <Route path="/lgu/profile" element={<LguProfile />} />
       <Route path="/anonymous-chat" element={<AnonymousChat />} />
       <Route path="/payment/result" element={<PaymentResult />} />
       <Route path="/profile" element={<Profile />} />

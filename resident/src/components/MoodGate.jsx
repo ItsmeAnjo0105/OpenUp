@@ -34,16 +34,16 @@ function MoodGate({ user, onLogged, onSkip }) {
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-6" onClick={onSkip}>
       <div
-        className="w-full max-w-lg bg-brand-primary rounded-3xl p-8"
+        className="w-full max-w-lg bg-brand-surface rounded-3xl p-8 border-4 border-brand-primary shadow-xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <h1 className="font-display text-2xl font-semibold text-white mb-1">How are you right now?</h1>
-        <p className="text-white/70 text-sm mb-6">Pick whatever fits closest.</p>
-        {error && <p className="text-sm text-white bg-white/15 rounded-lg px-3 py-2 mb-4">{error}</p>}
-        <EmotionPicker onPick={pick} disabled={saving} variant="dark" />
+        <h1 className="font-display text-2xl font-semibold text-brand-ink mb-1">How are you right now?</h1>
+        <p className="text-brand-ink/60 text-sm mb-6">Pick whatever fits closest.</p>
+        {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-4">{error}</p>}
+        <EmotionPicker onPick={pick} disabled={saving} variant="light" />
         <button
           onClick={onSkip}
-          className="text-sm text-white/60 hover:text-white mt-6"
+          className="text-sm text-brand-primary underline underline-offset-2 hover:text-brand-primary-dark mt-6"
         >
           Choose later
         </button>

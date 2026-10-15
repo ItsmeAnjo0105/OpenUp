@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import heroPsychologist from '../assets/hero-psychologist.png';
 
 // Small inline line-icon helper -- no icon library per the landing page spec.
 // Every icon below is a hand-drawn 24x24 stroke path.
@@ -430,10 +431,11 @@ function Landing() {
             {/* 3D hero stage -- every floating piece below is a bob-animation
                 wrapper (.lp-float-*) around a hover-pop wrapper (.lp-pop), so
                 the idle float and the hover lift/zoom/tilt/glow never fight
-                over the same transform. The 3D illustrations (brain, heart,
-                faces, seedling, the health-worker figure) are real assets
-                from Microsoft's open-source Fluent Emoji 3D set (MIT
-                licensed), not hand-drawn -- verified live before use. */}
+                over the same transform. The brain/heart/faces/star/seedling
+                illustrations are real assets from Microsoft's open-source
+                Fluent Emoji 3D set (MIT licensed), verified live before use.
+                The psychologist figure is the illustration provided directly
+                for this hero (src/assets/hero-psychologist.png). */}
             <div className="lp-hero-wrap relative h-[480px] hidden lg:block" aria-hidden="true">
               <div className="lp-hero-rig relative w-full h-full" style={{ transform: `rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg)` }}>
                 {/* back plate */}
@@ -471,10 +473,18 @@ function Landing() {
                   <Emoji3D path="Brain/3D/brain_3d.png" className="lp-pop w-full h-full drop-shadow-xl" rotate="7deg" />
                 </div>
 
-                {/* licensed psychologist card, with the health-worker figure above it */}
-                <div className="lp-float-e absolute right-6 top-12 w-44 flex flex-col items-center" style={{ transform: 'translateZ(90px)' }}>
-                  <Emoji3D path="Woman health worker/Default/3D/woman_health_worker_3d_default.png" className="lp-pop w-24 h-24 -mb-3 drop-shadow-xl" rotate="2deg" />
-                  <div className="lp-pop relative z-10 w-full bg-white rounded-2xl shadow-xl p-3" style={{ '--pop-rotate': '2deg' }}>
+                {/* licensed psychologist card, with the provided character
+                    illustration above it (already carries its own chat-bubble
+                    and heart accents, so no separate speech-bubble icon here) */}
+                <div className="lp-float-e absolute right-2 top-8 w-56 flex flex-col items-center" style={{ transform: 'translateZ(90px)' }}>
+                  <img
+                    src={heroPsychologist}
+                    alt="Licensed psychologist"
+                    draggable="false"
+                    className="lp-pop w-full h-auto -mb-5 drop-shadow-xl"
+                    style={{ '--pop-rotate': '2deg' }}
+                  />
+                  <div className="lp-pop relative z-10 w-40 bg-white rounded-2xl shadow-xl p-3" style={{ '--pop-rotate': '2deg' }}>
                     <div className="flex items-center gap-2">
                       <span className="w-3 h-3 rounded-full bg-green-400 shrink-0" />
                       <div className="min-w-0">
@@ -482,13 +492,6 @@ function Landing() {
                         <p className="text-[10px] text-slate-500 leading-tight">Available for your support</p>
                       </div>
                     </div>
-                  </div>
-                </div>
-
-                {/* small speech-bubble accent, near the psychologist */}
-                <div className="lp-float-b absolute right-48 top-24 w-9 h-9" style={{ transform: 'translateZ(160px)' }}>
-                  <div className="lp-pop w-full h-full rounded-full bg-white shadow-md flex items-center justify-center" style={{ '--pop-rotate': '-12deg' }}>
-                    <SvgIcon name="chat" className="w-4 h-4 text-teal-700" />
                   </div>
                 </div>
 

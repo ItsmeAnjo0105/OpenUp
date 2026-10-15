@@ -163,15 +163,38 @@ textarea:focus-visible,
   transition: transform 150ms ease-out;
 }
 
-/* Infinite bob for the floating hero cards -- always on, not scroll-linked */
+/* Infinite bob for the floating hero cards/decorations -- always on, not
+   scroll-linked. Each pauses while its content is hovered, so the hover-pop
+   transform below (on the inner element) doesn't fight the bob's own
+   transform on the outer wrapper. */
 @keyframes lp-bob-a { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
 @keyframes lp-bob-b { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-16px); } }
 @keyframes lp-bob-c { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
 @keyframes lp-bob-d { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-13px); } }
+@keyframes lp-bob-e { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+@keyframes lp-bob-f { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-11px); } }
 .lp-float-a { animation: lp-bob-a 5s ease-in-out infinite; }
 .lp-float-b { animation: lp-bob-b 6.5s ease-in-out infinite; }
 .lp-float-c { animation: lp-bob-c 4.2s ease-in-out infinite; }
 .lp-float-d { animation: lp-bob-d 7.2s ease-in-out infinite; }
+.lp-float-e { animation: lp-bob-e 3.4s ease-in-out infinite; }
+.lp-float-f { animation: lp-bob-f 5.8s ease-in-out infinite; }
+.lp-float-a:hover, .lp-float-b:hover, .lp-float-c:hover,
+.lp-float-d:hover, .lp-float-e:hover, .lp-float-f:hover {
+  animation-play-state: paused;
+}
+
+/* Hover-pop: lift + zoom + tilt + glow, for every floating hero decoration
+   and card. --pop-rotate lets each instance lean a different direction. */
+.lp-pop {
+  transition: transform 350ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 350ms ease;
+  cursor: default;
+}
+.lp-pop:hover {
+  transform: translateY(-11px) scale(1.06) rotate(var(--pop-rotate, -3deg));
+  box-shadow: 0 18px 34px rgba(45, 212, 191, 0.35);
+  z-index: 20;
+}
 
 /* Scroll progress bar along the navbar's bottom edge -- width set via inline
    style from useDocScrollProgress(); this just smooths frame-to-frame. */

@@ -21,7 +21,20 @@ import PsychologistNotes from './pages/PsychologistNotes';
 import PsychologistSchedule from './pages/PsychologistSchedule';
 import PsychologistReports from './pages/PsychologistReports';
 import PsychologistProfile from './pages/PsychologistProfile';
-import AdminDashboard from './pages/AdminDashboard';
+import AdminHome from './pages/AdminHome';
+import AdminLguAccounts from './pages/AdminLguAccounts';
+import AdminSubscriptions from './pages/AdminSubscriptions';
+import AdminResidents from './pages/AdminResidents';
+import AdminPsychologists from './pages/AdminPsychologists';
+import AdminVerification from './pages/AdminVerification';
+import AdminAppointments from './pages/AdminAppointments';
+import AdminCommunity from './pages/AdminCommunity';
+import AdminResources from './pages/AdminResources';
+import AdminAIManagement from './pages/AdminAIManagement';
+import AdminReports from './pages/AdminReports';
+import AdminAnnouncements from './pages/AdminAnnouncements';
+import AdminSettings from './pages/AdminSettings';
+import AdminProfile from './pages/AdminProfile';
 import LguDashboard from './pages/LguDashboard';
 import LguResidents from './pages/LguResidents';
 import LguHeatmap from './pages/LguHeatmap';
@@ -67,7 +80,20 @@ function App() {
       <Route path="/psychologist/schedule" element={<PsychologistSchedule />} />
       <Route path="/psychologist/reports" element={<PsychologistReports />} />
       <Route path="/psychologist/profile" element={<PsychologistProfile />} />
-      <Route path="/admin/dashboard" element={<AdminDashboard />} />
+      <Route path="/admin/dashboard" element={<AdminHome />} />
+      <Route path="/admin/lgu-accounts" element={<AdminLguAccounts />} />
+      <Route path="/admin/subscriptions" element={<AdminSubscriptions />} />
+      <Route path="/admin/residents" element={<AdminResidents />} />
+      <Route path="/admin/psychologists" element={<AdminPsychologists />} />
+      <Route path="/admin/verification" element={<AdminVerification />} />
+      <Route path="/admin/appointments" element={<AdminAppointments />} />
+      <Route path="/admin/community" element={<AdminCommunity />} />
+      <Route path="/admin/resources" element={<AdminResources />} />
+      <Route path="/admin/ai-management" element={<AdminAIManagement />} />
+      <Route path="/admin/reports" element={<AdminReports />} />
+      <Route path="/admin/announcements" element={<AdminAnnouncements />} />
+      <Route path="/admin/settings" element={<AdminSettings />} />
+      <Route path="/admin/profile" element={<AdminProfile />} />
       <Route path="/lgu/dashboard" element={<LguDashboard />} />
       <Route path="/lgu/heatmap" element={<LguHeatmap />} />
       <Route path="/lgu/risk-alerts" element={<LguRiskAlerts />} />

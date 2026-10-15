@@ -13,7 +13,7 @@ function EmotionPicker({ selectedLabel, onPick, disabled, variant = 'dark' }) {
           : 'bg-white/15 text-white hover:bg-white/25';
         const light = isSelected
           ? 'bg-brand-primary text-white'
-          : 'bg-brand-bg text-brand-ink/70 hover:bg-brand-ink/10';
+          : 'bg-brand-bg text-brand-ink/70 hover:bg-brand-primary hover:text-white';
 
         return (
           <button
@@ -21,13 +21,13 @@ function EmotionPicker({ selectedLabel, onPick, disabled, variant = 'dark' }) {
             type="button"
             disabled={disabled}
             onClick={() => onPick(e)}
-            className={`${base} ${variant === 'dark' ? dark : light}`}
+            className={`group ${base} ${variant === 'dark' ? dark : light}`}
           >
             <span
-              className={`w-7 h-7 rounded-full flex items-center justify-center text-base ${
+              className={`w-7 h-7 rounded-full flex items-center justify-center text-base transition-colors ${
                 variant === 'dark'
                   ? isSelected ? 'bg-brand-primary/10' : 'bg-white/10'
-                  : isSelected ? 'bg-white/20' : 'bg-white'
+                  : isSelected ? 'bg-white/20' : 'bg-white group-hover:bg-white/20'
               }`}
             >
               {e.emoji}

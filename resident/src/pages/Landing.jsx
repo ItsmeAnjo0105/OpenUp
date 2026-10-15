@@ -39,22 +39,22 @@ function SvgIcon({ name, className }) {
   return <Icon className={className}>{ICONS[name]}</Icon>;
 }
 
-function prefersReducedMotion() {
-  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
 // ---- Scroll interactivity, driven by JS rather than CSS scroll-timelines
 // (animation-timeline: view()/scroll() has spotty browser support, which left
 // every "scroll reveal" silently inert on some browsers). IntersectionObserver
-// and scroll-position math both work everywhere. ----
+// and scroll-position math both work everywhere.
+//
+// These always run, regardless of the system's prefers-reduced-motion setting
+// -- this is a project showcase page built specifically to demonstrate these
+// effects, so they shouldn't silently disable themselves. ----
 
 // One-time "has this scrolled into view" flag, for fade/rise/swing reveals.
 function useInView(threshold = 0.2) {
   const ref = useRef(null);
-  const [isIn, setIsIn] = useState(() => prefersReducedMotion());
+  const [isIn, setIsIn] = useState(false);
   useEffect(() => {
     const el = ref.current;
-    if (!el || prefersReducedMotion()) return;
+    if (!el) return;
     const obs = new IntersectionObserver(
       ([entry]) => { if (entry.isIntersecting) { setIsIn(true); obs.unobserve(el); } },
       { threshold, rootMargin: '0px 0px -10% 0px' }
@@ -72,7 +72,7 @@ function useScrollProgress(ref, neutral = 0) {
   const [progress, setProgress] = useState(neutral);
   useEffect(() => {
     const el = ref.current;
-    if (!el || prefersReducedMotion()) return;
+    if (!el) return;
     let raf = null;
     const measure = () => {
       const rect = el.getBoundingClientRect();
@@ -102,7 +102,6 @@ function useExitProgress(ref) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    if (prefersReducedMotion()) return;
     let raf = null;
     const measure = () => {
       const rect = el.getBoundingClientRect();
@@ -171,7 +170,7 @@ function TiltCard({ children, className = '' }) {
   const ref = useRef(null);
 
   const handleMove = (e) => {
-    if (prefersReducedMotion() || !ref.current) return;
+    if (!ref.current) return;
     const rect = ref.current.getBoundingClientRect();
     const px = (e.clientX - rect.left) / rect.width;
     const py = (e.clientY - rect.top) / rect.height;
@@ -241,14 +240,9 @@ function Landing() {
   const trustRef = useRef(null);
   const cubeWrapRef = useRef(null);
   const ctaRef = useRef(null);
-  const reducedMotionRef = useRef(false);
-
-  useEffect(() => {
-    reducedMotionRef.current = prefersReducedMotion();
-  }, []);
 
   const handleHeroMouseMove = (e) => {
-    if (reducedMotionRef.current || !heroRef.current) return;
+    if (!heroRef.current) return;
     const rect = heroRef.current.getBoundingClientRect();
     const px = (e.clientX - rect.left) / rect.width;
     const py = (e.clientY - rect.top) / rect.height;
@@ -270,7 +264,6 @@ function Landing() {
   const cubeMotion = useRef({ auto: 0, tiltRx: 0, tiltRy: 0 });
 
   useEffect(() => {
-    if (prefersReducedMotion()) return;
     const SPIN_MS = 14000; // one full lap every 14s
     let raf;
     let last = performance.now();
@@ -300,7 +293,7 @@ function Landing() {
   }, []);
 
   const handleCubeMouseMove = (e) => {
-    if (prefersReducedMotion() || !cubeWrapRef.current) return;
+    if (!cubeWrapRef.current) return;
     const rect = cubeWrapRef.current.getBoundingClientRect();
     const px = (e.clientX - rect.left) / rect.width;
     const py = (e.clientY - rect.top) / rect.height;

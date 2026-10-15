@@ -212,9 +212,5 @@ textarea:focus-visible,
 .lp-btn-lift { transition: transform 200ms ease, box-shadow 200ms ease; }
 .lp-btn-lift:hover { transform: translateZ(10px) translateY(-2px); box-shadow: 0 14px 28px rgba(15, 118, 110, 0.3); }
 
-@media (prefers-reduced-motion: reduce) {
-  .lp-float-a, .lp-float-b, .lp-float-c, .lp-float-d { animation: none !important; }
-  .lp-reveal-js { transition: none !important; opacity: 1 !important; transform: none !important; }
-  .lp-tilt:hover, .lp-tilt-alt:hover, .lp-btn-lift:hover { transform: none !important; box-shadow: none !important; }
-  .lp-hero-rig { transform: none !important; transition: none !important; }
-}
+/* Deliberately not gated behind prefers-reduced-motion: this page exists to
+   demonstrate these effects for a capstone review, so they always run. */

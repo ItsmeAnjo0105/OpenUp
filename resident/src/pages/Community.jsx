@@ -137,6 +137,7 @@ function Community() {
   const [expandedId, setExpandedId] = useState(null);
   const [error, setError] = useState('');
   const [confirmDialog, setConfirmDialog] = useState(null);
+  const [reportedIds, setReportedIds] = useState([]);
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   const load = () => {
@@ -211,6 +212,18 @@ function Community() {
     });
   };
 
+  const report = async (testimonialId) => {
+    try {
+      const res = await fetch(`${API_URL}/testimonials/${testimonialId}/report`, {
+        method: 'POST',
+        headers: authHeader(),
+      });
+      if (res.ok) setReportedIds((prev) => [...prev, testimonialId]);
+    } catch {
+      // leave as-is; the user can try again
+    }
+  };
+
   return (
     <Layout>
       <div className="max-w-2xl mx-auto">
@@ -240,11 +253,19 @@ function Community() {
                   <p className="text-sm font-semibold">{t.User?.name || 'Someone'}</p>
                   <p className="text-xs text-brand-ink/50">{new Date(t.created_at).toLocaleDateString()}</p>
                 </div>
-                {t.user_id === user?.user_id && (
+                {t.user_id === user?.user_id ? (
                   <div className="flex gap-2 shrink-0">
                     <button onClick={() => { setEditingId(t.testimonial_id); setEditDraft(t.body); }} className="text-xs text-brand-ink/50">Edit</button>
                     <button onClick={() => confirmRemove(t.testimonial_id)} className="text-xs text-red-600">Delete</button>
                   </div>
+                ) : (
+                  <button
+                    onClick={() => report(t.testimonial_id)}
+                    disabled={reportedIds.includes(t.testimonial_id) || t.flagged}
+                    className="text-xs text-brand-ink/40 shrink-0 disabled:text-brand-ink/25"
+                  >
+                    {reportedIds.includes(t.testimonial_id) || t.flagged ? 'Reported' : 'Report'}
+                  </button>
                 )}
               </div>
 

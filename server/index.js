@@ -330,15 +330,64 @@ app.patch('/testimonials/:id', requireAuth, async (req, res) => {
   res.json(data[0]);
 });
 
+// Owner can delete their own post; an admin can delete ANY post (the
+// "Remove Content" moderation action) regardless of who wrote it.
 app.delete('/testimonials/:id', requireAuth, async (req, res) => {
   const { data: existing, error: findError } = await supabase
     .from('Testimonial').select('user_id').eq('testimonial_id', req.params.id).single();
   if (findError || !existing) return res.status(404).json({ error: 'Testimonial not found' });
-  if (existing.user_id !== req.user.user_id) return res.status(403).json({ error: 'This is not your post' });
+  if (existing.user_id !== req.user.user_id && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'This is not your post' });
+  }
 
   const { error } = await supabase.from('Testimonial').delete().eq('testimonial_id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ deleted: true });
+});
+
+// POST /testimonials/:id/report — any signed-in user flags a post for admin
+// review. body: { reason } optional. Re-reporting an already-flagged post
+// just updates the reason rather than erroring.
+app.post('/testimonials/:id/report', requireAuth, async (req, res) => {
+  const { reason } = req.body;
+
+  const { data: existing, error: findError } = await supabase
+    .from('Testimonial').select('testimonial_id').eq('testimonial_id', req.params.id).single();
+  if (findError || !existing) return res.status(404).json({ error: 'Testimonial not found' });
+
+  const { data, error } = await supabase
+    .from('Testimonial')
+    .update({ flagged: true, flag_reason: reason || null })
+    .eq('testimonial_id', req.params.id)
+    .select('*, User(name)');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data[0]);
+});
+
+// GET /admin/testimonials?flagged=true — "Review Flagged Content". Omit the
+// query param for every post (useful for a general moderation sweep).
+app.get('/admin/testimonials', requireAuth, requireRole('admin'), async (req, res) => {
+  let query = supabase.from('Testimonial').select('*, User(name)').order('created_at', { ascending: false });
+  if (req.query.flagged === 'true') query = query.eq('flagged', true);
+
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// POST /admin/testimonials/:id/keep — "Keep Content": clears the flag,
+// leaves the post itself untouched.
+app.post('/admin/testimonials/:id/keep', requireAuth, requireRole('admin'), async (req, res) => {
+  const { data, error } = await supabase
+    .from('Testimonial')
+    .update({ flagged: false, flag_reason: null })
+    .eq('testimonial_id', req.params.id)
+    .select('*, User(name)');
+
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data || data.length === 0) return res.status(404).json({ error: 'Testimonial not found' });
+  res.json(data[0]);
 });
 
 app.get('/testimonials/:id/comments', async (req, res) => {

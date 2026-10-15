@@ -1533,6 +1533,91 @@ app.get('/lgu/me/monthly-report', requireAuth, requireRole('lgu'), async (req, r
   });
 });
 
+// GET /lgu/me/ai-effectiveness — real data behind the AI Effectiveness
+// Tracker, scoped to this barangay's own residents:
+//   - Detection: Voice Journal's risk_flag + the AI Crisis Companion's
+//     AI_Detection_Log, combined. Labeled "detection rate", not "accuracy" --
+//     there's no human-confirmed ground truth anywhere in this app to measure
+//     true accuracy against, so claiming one would be fabricated.
+//   - Escalation outcomes: real Booking rows with session_type = 'crisis'
+//     (matched immediately), by status, plus Crisis_Requests rows (queued --
+//     nobody was available) -- see escalateCrisis().
+//   - Ratings: real AI_Rating rows residents submitted themselves.
+app.get('/lgu/me/ai-effectiveness', requireAuth, requireRole('lgu'), async (req, res) => {
+  const { data: me, error: meError } = await supabase
+    .from('User')
+    .select('barangay_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+  if (meError || !me) return res.status(404).json({ error: 'Account not found' });
+
+  const { data: residents, error: residentsError } = await supabase
+    .from('User')
+    .select('user_id')
+    .eq('role', 'resident')
+    .eq('barangay_id', me.barangay_id);
+  if (residentsError) return res.status(500).json({ error: residentsError.message });
+  const residentIds = residents.map((r) => r.user_id);
+  const idFilter = residentIds.length ? residentIds : [0];
+
+  const [journalRes, chatLogRes, ratingRes, bookingRes, queueRes] = await Promise.all([
+    supabase.from('Voice_Journal').select('risk_flag').in('user_id', idFilter),
+    supabase.from('AI_Detection_Log').select('crisis_detected').in('user_id', idFilter),
+    supabase.from('AI_Rating').select('rating').in('user_id', idFilter),
+    supabase.from('Booking').select('status').in('resident_id', idFilter).eq('session_type', 'crisis'),
+    supabase.from('Crisis_Requests').select('status').in('user_id', idFilter),
+  ]);
+  for (const r of [journalRes, chatLogRes, ratingRes, bookingRes, queueRes]) {
+    if (r.error) return res.status(500).json({ error: r.error.message });
+  }
+
+  const journalEntries = journalRes.data;
+  const chatTurns = chatLogRes.data;
+  const ratings = ratingRes.data;
+  const crisisBookings = bookingRes.data;
+  const queuedRequests = queueRes.data;
+
+  const journalFlagged = journalEntries.filter((j) => j.risk_flag).length;
+  const chatFlagged = chatTurns.filter((c) => c.crisis_detected).length;
+  const totalChecked = journalEntries.length + chatTurns.length;
+  const totalFlagged = journalFlagged + chatFlagged;
+
+  const ratingCount = ratings.length;
+  const ratingAverage = ratingCount > 0
+    ? Math.round((ratings.reduce((sum, r) => sum + r.rating, 0) / ratingCount) * 10) / 10
+    : null;
+  const ratingDistribution = [1, 2, 3, 4, 5].map((star) => ({
+    star,
+    count: ratings.filter((r) => r.rating === star).length,
+  }));
+
+  res.json({
+    detection: {
+      voice_journal: { total: journalEntries.length, flagged: journalFlagged },
+      companion_chat: { total: chatTurns.length, flagged: chatFlagged },
+      total_checked: totalChecked,
+      total_flagged: totalFlagged,
+      flag_rate: totalChecked > 0 ? Math.round((totalFlagged / totalChecked) * 100) : null,
+    },
+    escalations: {
+      matched: crisisBookings.length,
+      matched_by_status: {
+        confirmed: crisisBookings.filter((b) => b.status === 'confirmed').length,
+        pending: crisisBookings.filter((b) => b.status === 'pending').length,
+        cancelled: crisisBookings.filter((b) => b.status === 'cancelled').length,
+        declined: crisisBookings.filter((b) => b.status === 'declined').length,
+      },
+      queued: queuedRequests.length,
+      total: crisisBookings.length + queuedRequests.length,
+    },
+    ratings: {
+      count: ratingCount,
+      average: ratingAverage,
+      distribution: ratingDistribution,
+    },
+  });
+});
+
 // GET /lgu/me/residents — the logged-in LGU's own barangay residents, with
 // their latest check-in date and flag status. Real names are shown here
 // (unlike the psychologist-facing anonymization) since this IS the local
@@ -3610,11 +3695,18 @@ app.post('/crisis-match', async (req, res) => {
 const COMPANION_SYSTEM_PROMPT = `You are a warm, supportive, non-clinical companion inside a mental wellness app called OpenUp for Cebu City residents. Respond in 2-4 sentences. Offer a simple grounding or breathing exercise if it fits naturally. Never diagnose, never use clinical labels, never claim to be a licensed professional. Match the language the person used (Bisaya, Filipino, or English) as best you can. Gently encourage reaching out to a licensed psychologist for anything serious, without being pushy or repetitive. Never invent or state specific phone numbers, hotline numbers, or emergency contact details under any circumstance — you do not actually know them; the app shows verified local crisis resources separately. If someone expresses thoughts of self-harm or suicide, respond with calm, direct empathy and gently point them toward the app's in-app option to connect with a licensed psychologist, without listing any phone numbers yourself.`;
 
 app.post('/crisis-companion/chat', async (req, res) => {
-  const { message, history } = req.body;
+  const { message, history, user_id } = req.body;
 
   if (!message) return res.status(400).json({ error: 'message is required' });
 
   const isCrisis = detectCrisisRisk(message);
+
+  // Feeds the AI Effectiveness Tracker's detection rate -- never the message
+  // itself, just whether this turn tripped the check. Best-effort: a logging
+  // failure shouldn't break the conversation.
+  if (user_id) {
+    supabase.from('AI_Detection_Log').insert([{ user_id, crisis_detected: isCrisis }]).then(() => {});
+  }
 
   // `history` already ends with this same user message (the client appends it before sending),
   // so it's passed through as-is rather than appending `message` a second time.
@@ -3652,6 +3744,24 @@ app.post('/crisis-companion/chat', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// POST /crisis-companion/rate — a resident's own rating of an AI Crisis
+// Companion conversation (1-5). Feeds the AI Effectiveness Tracker's View
+// User Ratings -- the one signal nothing else in this app could stand in for.
+app.post('/crisis-companion/rate', async (req, res) => {
+  const { user_id, rating } = req.body;
+  const numericRating = Number(rating);
+  if (!user_id || !Number.isInteger(numericRating) || numericRating < 1 || numericRating > 5) {
+    return res.status(400).json({ error: 'user_id and rating (1-5) are required' });
+  }
+
+  const { data, error } = await supabase
+    .from('AI_Rating')
+    .insert([{ user_id, rating: numericRating }])
+    .select();
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data[0]);
 });
 
 app.post('/mood-entries', async (req, res) => {

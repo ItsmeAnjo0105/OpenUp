@@ -15,6 +15,8 @@ function CrisisCompanion() {
   const [contacts, setContacts] = useState([]);
   const [alertedIds, setAlertedIds] = useState([]);
   const [alertError, setAlertError] = useState('');
+  const [rating, setRating] = useState(null);
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
   const bottomRef = useRef(null);
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
@@ -62,7 +64,7 @@ function CrisisCompanion() {
       const res = await fetch(`${API_URL}/crisis-companion/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input, history: newMessages }),
+        body: JSON.stringify({ message: input, history: newMessages, user_id: user.user_id }),
       });
       const data = await res.json();
 
@@ -72,6 +74,20 @@ function CrisisCompanion() {
       setMessages([...newMessages, { role: 'assistant', content: "I'm having trouble connecting right now. Please try again." }]);
     } finally {
       setSending(false);
+    }
+  };
+
+  const submitRating = async (value) => {
+    setRating(value);
+    try {
+      const res = await fetch(`${API_URL}/crisis-companion/rate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.user_id, rating: value }),
+      });
+      if (res.ok) setRatingSubmitted(true);
+    } catch {
+      // leave the stars selected so the user can retry
     }
   };
 
@@ -175,6 +191,28 @@ function CrisisCompanion() {
           ))}
           <div ref={bottomRef} />
         </div>
+
+        {messages.length > 2 && (
+          <div className="flex items-center justify-between gap-2 mb-3 px-1">
+            <p className="text-xs text-brand-ink/50">
+              {ratingSubmitted ? 'Thanks for letting us know.' : 'How helpful has this conversation been?'}
+            </p>
+            <div className="flex gap-1">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  type="button"
+                  disabled={ratingSubmitted}
+                  onClick={() => submitRating(star)}
+                  className="text-lg leading-none disabled:cursor-default"
+                  aria-label={`Rate ${star} out of 5`}
+                >
+                  {rating != null && star <= rating ? '★' : '☆'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSend} className="flex gap-2">
           <input

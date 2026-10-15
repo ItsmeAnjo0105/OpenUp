@@ -1198,6 +1198,25 @@ async function getLatestSafetyFlagByResident() {
   return latestByUser;
 }
 
+// "Flag High-Risk Cases": a human judgment call an LGU office makes (see
+// db/lgu_risk_flags.sql), separate from the automatic safety_flag above. A
+// resident counts as high-risk if EITHER signal is present -- their own
+// check-in flagged a concern, or their barangay flagged them directly.
+async function getActiveManualFlagsByResident() {
+  const { data, error } = await supabase
+    .from('LGU_Risk_Flag')
+    .select('resident_id, reason, created_at, flagged_by')
+    .eq('status', 'active')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  const byResident = new Map();
+  for (const f of data) {
+    if (!byResident.has(f.resident_id)) byResident.set(f.resident_id, f);
+  }
+  return byResident;
+}
+
 // Same idea for mood: each resident's most recent Mood_Entry within the last
 // 30 days, used for the wellness index and "who's actively checking in."
 async function getRecentMoodByResident() {
@@ -1307,17 +1326,20 @@ app.get('/lgu/me/dashboard', requireAuth, requireRole('lgu'), async (req, res) =
     .eq('barangay_id', me.barangay_id)
     .maybeSingle();
 
-  let safetyFlagByResident, moodByResident;
+  let safetyFlagByResident, moodByResident, manualFlagByResident;
   try {
-    [safetyFlagByResident, moodByResident] = await Promise.all([
+    [safetyFlagByResident, moodByResident, manualFlagByResident] = await Promise.all([
       getLatestSafetyFlagByResident(),
       getRecentMoodByResident(),
+      getActiveManualFlagsByResident(),
     ]);
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 
-  const highRiskCount = residentIds.filter((id) => safetyFlagByResident.get(id) === true).length;
+  const highRiskCount = residentIds.filter(
+    (id) => safetyFlagByResident.get(id) === true || manualFlagByResident.has(id)
+  ).length;
 
   const moodValues = residentIds.map((id) => moodByResident.get(id)).filter((v) => v !== undefined);
   const wellnessIndex = moodValues.length > 0
@@ -1531,11 +1553,12 @@ app.get('/lgu/me/residents', requireAuth, requireRole('lgu'), async (req, res) =
     .order('name', { ascending: true });
   if (residentsError) return res.status(500).json({ error: residentsError.message });
 
-  let safetyFlagByResident, moodByResident;
+  let safetyFlagByResident, moodByResident, manualFlagByResident;
   try {
-    [safetyFlagByResident, moodByResident] = await Promise.all([
+    [safetyFlagByResident, moodByResident, manualFlagByResident] = await Promise.all([
       getLatestSafetyFlagByResident(),
       getRecentMoodByResident(),
+      getActiveManualFlagsByResident(),
     ]);
   } catch (err) {
     return res.status(500).json({ error: err.message });
@@ -1553,13 +1576,104 @@ app.get('/lgu/me/residents', requireAuth, requireRole('lgu'), async (req, res) =
     if (!lastCheckInByUser.has(m.user_id)) lastCheckInByUser.set(m.user_id, m.entry_date);
   }
 
-  res.json(residents.map((r) => ({
-    user_id: r.user_id,
-    name: r.name,
-    last_check_in: lastCheckInByUser.get(r.user_id) || null,
-    recent_mood_level: moodByResident.get(r.user_id) ?? null,
-    flagged: safetyFlagByResident.get(r.user_id) === true,
-  })));
+  res.json(residents.map((r) => {
+    const manualFlag = manualFlagByResident.get(r.user_id);
+    const autoFlagged = safetyFlagByResident.get(r.user_id) === true;
+    return {
+      user_id: r.user_id,
+      name: r.name,
+      last_check_in: lastCheckInByUser.get(r.user_id) || null,
+      recent_mood_level: moodByResident.get(r.user_id) ?? null,
+      auto_flagged: autoFlagged,
+      manually_flagged: !!manualFlag,
+      manual_flag_reason: manualFlag?.reason || null,
+      flagged: autoFlagged || !!manualFlag,
+    };
+  }));
+});
+
+// POST /lgu/me/residents/:residentId/flag — "Flag High-Risk Cases": a manual
+// flag the LGU raises itself (a field report, a home visit), independent of
+// the resident's own check-in. body: { reason } optional. Upserts: raising a
+// flag on an already-actively-flagged resident just updates the reason.
+app.post('/lgu/me/residents/:residentId/flag', requireAuth, requireRole('lgu'), async (req, res) => {
+  const { reason } = req.body;
+  const residentId = Number(req.params.residentId);
+
+  const { data: me, error: meError } = await supabase
+    .from('User')
+    .select('barangay_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+  if (meError || !me) return res.status(404).json({ error: 'Account not found' });
+
+  const { data: resident, error: residentError } = await supabase
+    .from('User')
+    .select('user_id, barangay_id')
+    .eq('user_id', residentId)
+    .eq('role', 'resident')
+    .single();
+  if (residentError || !resident) return res.status(404).json({ error: 'Resident not found' });
+  if (resident.barangay_id !== me.barangay_id) {
+    return res.status(403).json({ error: 'This resident is not registered under your barangay' });
+  }
+
+  const { data: existing } = await supabase
+    .from('LGU_Risk_Flag')
+    .select('flag_id')
+    .eq('resident_id', residentId)
+    .eq('status', 'active')
+    .maybeSingle();
+
+  if (existing) {
+    const { data, error } = await supabase
+      .from('LGU_Risk_Flag')
+      .update({ reason: reason || null })
+      .eq('flag_id', existing.flag_id)
+      .select();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json(data[0]);
+  }
+
+  const { data, error } = await supabase
+    .from('LGU_Risk_Flag')
+    .insert([{ resident_id: residentId, barangay_id: me.barangay_id, flagged_by: req.user.user_id, reason: reason || null }])
+    .select();
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data[0]);
+});
+
+// DELETE /lgu/me/residents/:residentId/flag — resolves the active manual
+// flag (if any). The automatic safety_flag signal, if present, is untouched
+// -- this only clears the LGU's own manual judgment call.
+app.delete('/lgu/me/residents/:residentId/flag', requireAuth, requireRole('lgu'), async (req, res) => {
+  const residentId = Number(req.params.residentId);
+
+  const { data: me, error: meError } = await supabase
+    .from('User')
+    .select('barangay_id')
+    .eq('user_id', req.user.user_id)
+    .single();
+  if (meError || !me) return res.status(404).json({ error: 'Account not found' });
+
+  const { data: existing, error: existingError } = await supabase
+    .from('LGU_Risk_Flag')
+    .select('flag_id, barangay_id')
+    .eq('resident_id', residentId)
+    .eq('status', 'active')
+    .maybeSingle();
+  if (existingError) return res.status(500).json({ error: existingError.message });
+  if (!existing) return res.status(404).json({ error: 'No active flag for this resident' });
+  if (existing.barangay_id !== me.barangay_id) {
+    return res.status(403).json({ error: 'This resident is not registered under your barangay' });
+  }
+
+  const { error } = await supabase
+    .from('LGU_Risk_Flag')
+    .update({ status: 'resolved', resolved_at: new Date().toISOString() })
+    .eq('flag_id', existing.flag_id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ resolved: true });
 });
 
 // POST /lgu/me/care-credits/issue — like /care-credits/allocate, but for the
@@ -1621,9 +1735,11 @@ const HEATMAP_RANGE_DAYS = { week: 7, month: 30, quarter: 90 };
 
 // Shared by the LGU citywide overview and the Admin full heatmap: every
 // barangay's risk band for a given lookback window, based on DISTINCT
-// residents who raised >=1 safety flag within that window -- not just
-// "ever" -- so "This Week" vs "This Month" vs "This Quarter" actually mean
-// something different. recent_flag_count is the raw count of flagged
+// residents who raised >=1 safety flag within that window, UNION any
+// resident the barangay has manually flagged (an ongoing status, not a
+// dated event, so it counts regardless of the selected window) -- so "This
+// Week" vs "This Month" vs "This Quarter" change the check-in side, not the
+// manual side. recent_flag_count is the raw count of flagged
 // Assessment_Result rows in the window (a density signal; can exceed
 // resident_count if the same resident flags more than once).
 async function computeCitywideOverview(rangeDays) {
@@ -1647,6 +1763,8 @@ async function computeCitywideOverview(rangeDays) {
     .gte('created_at', windowStart.toISOString());
   if (windowFlagsError) throw windowFlagsError;
 
+  const manualFlagByResident = await getActiveManualFlagsByResident();
+
   const residentsByBarangay = new Map();
   for (const r of residents) {
     if (!residentsByBarangay.has(r.barangay_id)) residentsByBarangay.set(r.barangay_id, []);
@@ -1660,7 +1778,7 @@ async function computeCitywideOverview(rangeDays) {
 
   return barangays.map((b) => {
     const ids = residentsByBarangay.get(b.barangay_id) || [];
-    const flaggedCount = ids.filter((id) => flaggedUserIdsInWindow.has(id)).length;
+    const flaggedCount = ids.filter((id) => flaggedUserIdsInWindow.has(id) || manualFlagByResident.has(id)).length;
     const recentFlagCount = ids.reduce((sum, id) => sum + (flagEventCountByUser.get(id) || 0), 0);
     return {
       barangay_id: b.barangay_id,

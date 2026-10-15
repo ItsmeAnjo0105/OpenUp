@@ -1,9 +1,63 @@
-import { useState, useRef, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { IconMicrophone, IconPlayerPlay, IconPlayerPause } from '@tabler/icons-react';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  IconMicrophone, IconPlayerPlay, IconPlayerPause,
+  IconFlame, IconNotebook, IconHeart, IconSun,
+  IconWind, IconPencil, IconWalk, IconUsers, IconLeaf, IconChevronRight,
+} from '@tabler/icons-react';
 import Layout from '../components/Layout';
 import JournalHistory from '../components/JournalHistory';
 import { API_URL } from '../config';
+import { LEVEL_FALLBACK_LABEL } from '../utils/emotions';
+import { emotionMeta } from '../utils/voiceEmotions';
+
+const RECOMMENDATIONS = [
+  { icon: IconWind, title: 'Take a 2-minute breathing break', desc: 'Slow down. Breathe. You got this.' },
+  { icon: IconPencil, title: 'Write down how you’re feeling', desc: 'It helps to get your thoughts out.', action: 'journal' },
+  { icon: IconWalk, title: 'Take a short walk or stretch', desc: 'Move a little. Feel a little better.' },
+  { icon: IconUsers, title: 'Reach out to someone you trust', desc: "You don’t have to go through this alone.", action: 'chat' },
+];
+
+function greetingForNow() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good Morning';
+  if (h < 18) return 'Good Afternoon';
+  return 'Good Evening';
+}
+
+// Consecutive days (ending today) with at least one journal entry -- same
+// "streak ending today" logic the server uses for the mood check-in streak,
+// applied here to Voice_Journal's own dates instead.
+function computeJournalStreak(entries) {
+  if (!entries.length) return 0;
+  const dates = new Set(entries.map((e) => new Date(e.created_at).toDateString()));
+  let streak = 0;
+  const cursor = new Date();
+  while (dates.has(cursor.toDateString())) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+function computeAvgMoodLabel(entries) {
+  if (!entries.length) return '—';
+  const avg = entries.reduce((sum, e) => sum + emotionMeta(e.emotion_result).level, 0) / entries.length;
+  const rounded = Math.min(5, Math.max(1, Math.round(avg)));
+  return LEVEL_FALLBACK_LABEL[rounded];
+}
+
+function StatTile({ icon, label, value, tint }) {
+  return (
+    <div className="border border-brand-ink/10 rounded-xl p-3 flex items-center gap-2.5 min-w-0">
+      <span className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${tint}`}>{icon}</span>
+      <div className="min-w-0">
+        <p className="text-xs text-brand-ink/50 truncate">{label}</p>
+        <p className="text-sm font-semibold truncate">{value}</p>
+      </div>
+    </div>
+  );
+}
 
 const BAR_COUNT = 5;
 const BAR_MIN_HEIGHT = 6; // px — never fully flatten to zero during quiet moments
@@ -47,9 +101,15 @@ function VoiceJournal() {
   const recordingStartRef = useRef(null);
   const reviewBlobRef = useRef(null);
   const reviewAudioRef = useRef(null);
+  const micCardRef = useRef(null);
 
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
+
+  const handleRecommendation = (action) => {
+    if (action === 'journal') micCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (action === 'chat') navigate('/anonymous-chat');
+  };
 
   const loadHistory = () => {
     fetch(`${API_URL}/voice-journal/user/${user.user_id}`)
@@ -261,26 +321,37 @@ function VoiceJournal() {
     }
   };
 
+  const journalStreak = useMemo(() => computeJournalStreak(history), [history]);
+  const avgMoodLabel = useMemo(() => computeAvgMoodLabel(history), [history]);
+  const lastEntryLabel = history[0]
+    ? new Date(history[0].created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
+    : '—';
+
   if (!user) return null;
 
   return (
     <Layout>
-      <div className="max-w-xl mx-auto">
-        <h1 className="font-display text-2xl font-semibold mb-1">Voice Journal</h1>
-        <p className="text-brand-ink/60 text-sm mb-8">Speak freely. We'll listen and reflect it back.</p>
+      <div className="flex items-start justify-between gap-4 mb-6">
+        <div>
+          <h1 className="font-display text-2xl font-semibold">{greetingForNow()}, {user.name?.split(' ')[0]}</h1>
+          <p className="text-brand-ink/60 text-sm mt-0.5">Take a moment. Your thoughts matter.</p>
+        </div>
+      </div>
 
+      <div className="grid lg:grid-cols-[1fr_320px] gap-6 items-start">
+        <div className="min-w-0 space-y-6">
         {step !== 'reviewing' && (
-          <div className="bg-brand-surface rounded-2xl shadow-sm p-8 text-center mb-8">
-            <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
+          <div ref={micCardRef} className="bg-emerald-50/70 rounded-2xl p-6 sm:p-8 flex items-center gap-6 flex-wrap sm:flex-nowrap">
+            <div className="relative w-20 h-20 sm:w-24 sm:h-24 shrink-0 flex items-center justify-center mx-auto sm:mx-0">
               {step === 'listening' && speaking && (
                 <>
-                  <span className="absolute w-24 h-24 rounded-full mic-ring" />
-                  <span className="absolute w-24 h-24 rounded-full mic-ring" style={{ animationDelay: '0.6s' }} />
+                  <span className="absolute w-20 h-20 sm:w-24 sm:h-24 rounded-full mic-ring" />
+                  <span className="absolute w-20 h-20 sm:w-24 sm:h-24 rounded-full mic-ring" style={{ animationDelay: '0.6s' }} />
                 </>
               )}
               <button
                 onClick={step === 'listening' ? stopRecording : startRecording}
-                className="relative z-10 w-24 h-24 rounded-full flex items-center justify-center"
+                className="relative z-10 w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center shrink-0"
                 style={{ backgroundColor: '#2b4d3f' }}
               >
                 {step === 'listening' ? (
@@ -299,17 +370,25 @@ function VoiceJournal() {
                 )}
               </button>
             </div>
-            <p className="mt-4 text-sm text-brand-ink/60 font-medium">
-              {step === 'listening' ? 'Listening…' : 'Tap to open up'}
-            </p>
+            <div className="text-center sm:text-left flex-1 min-w-0">
+              <h2 className="font-display text-xl font-semibold">Voice Journal</h2>
+              <p className="text-sm text-brand-ink/60 mt-0.5">Speak freely. We'll listen and reflect it back.</p>
+              <button
+                onClick={step === 'listening' ? stopRecording : startRecording}
+                className="interactive mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-white px-5 py-2.5 rounded-full"
+                style={{ backgroundColor: '#2b4d3f' }}
+              >
+                {step === 'listening' ? 'Listening…' : 'Tap to open up'} <IconChevronRight size={14} />
+              </button>
 
-            {micDenied && (
-              <p className="mt-4 text-sm text-brand-accent bg-brand-accent/10 rounded-lg px-4 py-3">
-                We couldn't access your microphone. Please allow microphone access in your browser
-                settings to use Voice Journal.
-              </p>
-            )}
-            {status && <p className="mt-4 text-brand-ink/60 text-sm">{status}</p>}
+              {micDenied && (
+                <p className="mt-4 text-sm text-brand-accent bg-brand-accent/10 rounded-lg px-4 py-3">
+                  We couldn't access your microphone. Please allow microphone access in your browser
+                  settings to use Voice Journal.
+                </p>
+              )}
+              {status && <p className="mt-4 text-brand-ink/60 text-sm">{status}</p>}
+            </div>
           </div>
         )}
 
@@ -466,6 +545,76 @@ function VoiceJournal() {
         )}
 
         <JournalHistory entries={history} />
+        </div>
+
+        <div className="space-y-6">
+          <div className="bg-brand-surface rounded-2xl shadow-sm p-5" style={{ border: '0.5px solid rgba(28,36,32,0.1)' }}>
+            <p className="font-display text-base font-semibold mb-3">Your Wellness at a Glance</p>
+            <div className="grid grid-cols-2 gap-3">
+              <StatTile
+                icon={<IconFlame size={17} />}
+                label="Mood Streak"
+                value={`${journalStreak} day${journalStreak === 1 ? '' : 's'}`}
+                tint="bg-emerald-100 text-emerald-700"
+              />
+              <StatTile
+                icon={<IconNotebook size={17} />}
+                label="Total Journals"
+                value={history.length}
+                tint="bg-sky-100 text-sky-700"
+              />
+              <StatTile
+                icon={<IconHeart size={17} />}
+                label="Last Entry"
+                value={lastEntryLabel}
+                tint="bg-violet-100 text-violet-700"
+              />
+              <StatTile
+                icon={<IconSun size={17} />}
+                label="Avg Mood"
+                value={avgMoodLabel}
+                tint="bg-amber-100 text-amber-700"
+              />
+            </div>
+          </div>
+
+          <div className="bg-brand-surface rounded-2xl shadow-sm p-5" style={{ border: '0.5px solid rgba(28,36,32,0.1)' }}>
+            <p className="font-display text-base font-semibold flex items-center gap-1.5">
+              <IconLeaf size={16} className="text-brand-primary" /> Recommendations to Do
+            </p>
+            <p className="text-xs text-brand-ink/50 mb-3">Small steps can make a big difference.</p>
+            <div>
+              {RECOMMENDATIONS.map((r) => {
+                const Icon = r.icon;
+                const content = (
+                  <>
+                    <span className="w-10 h-10 rounded-xl bg-brand-primary/10 text-brand-primary flex items-center justify-center shrink-0">
+                      <Icon size={18} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium leading-tight">{r.title}</p>
+                      <p className="text-xs text-brand-ink/50 mt-0.5">{r.desc}</p>
+                    </div>
+                  </>
+                );
+                return r.action ? (
+                  <button
+                    key={r.title}
+                    onClick={() => handleRecommendation(r.action)}
+                    className="w-full flex items-center gap-3 py-2.5 text-left hover:bg-brand-ink/5 rounded-xl px-1.5 -mx-1.5"
+                  >
+                    {content}
+                    <IconChevronRight size={15} className="text-brand-ink/30 shrink-0" />
+                  </button>
+                ) : (
+                  <div key={r.title} className="w-full flex items-center gap-3 py-2.5">
+                    {content}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       </div>
     </Layout>
   );

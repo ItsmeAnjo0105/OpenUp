@@ -4111,6 +4111,7 @@ app.post('/voice-journal', upload.single('audio'), async (req, res) => {
         user_id,
         transcript,
         emotion_result: contentEmotion,
+        content_indicators: contentIndicators,
         risk_flag: isCrisis,
         audio_path: audioPath,
         duration_seconds: duration_seconds ? Number(duration_seconds) : null,

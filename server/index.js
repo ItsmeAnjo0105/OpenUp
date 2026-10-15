@@ -4049,6 +4049,13 @@ app.post('/voice-journal', upload.single('audio'), async (req, res) => {
       if (whisperData.error && whisperData.error.includes('loading')) {
         return res.status(503).json({ error: 'Model is warming up, try again in ~20 seconds.' });
       }
+      // HuggingFace Inference Providers now requires paid credits on most
+      // models (whisperRes.status 402) — this is a billing state, not a
+      // transient failure, so it gets its own honest message instead of a
+      // bare "Transcription failed."
+      if (whisperRes.status === 402) {
+        return res.status(503).json({ error: "Voice journaling is temporarily unavailable — the transcription service needs a billing top-up. We're on it." });
+      }
       return res.status(500).json({ error: 'Transcription failed', detail: whisperData });
     }
 

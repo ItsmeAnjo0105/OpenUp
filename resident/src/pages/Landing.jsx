@@ -39,6 +39,130 @@ function SvgIcon({ name, className }) {
   return <Icon className={className}>{ICONS[name]}</Icon>;
 }
 
+function prefersReducedMotion() {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+// ---- Scroll interactivity, driven by JS rather than CSS scroll-timelines
+// (animation-timeline: view()/scroll() has spotty browser support, which left
+// every "scroll reveal" silently inert on some browsers). IntersectionObserver
+// and scroll-position math both work everywhere. ----
+
+// One-time "has this scrolled into view" flag, for fade/rise/swing reveals.
+function useInView(threshold = 0.2) {
+  const ref = useRef(null);
+  const [isIn, setIsIn] = useState(() => prefersReducedMotion());
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || prefersReducedMotion()) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { setIsIn(true); obs.unobserve(el); } },
+      { threshold, rootMargin: '0px 0px -10% 0px' }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [threshold, ref]);
+  return [ref, isIn];
+}
+
+// Continuous 0..1 progress of an element crossing the viewport (0 = just
+// entering from the bottom, 1 = fully scrolled past the top). Used for the
+// trust cube's rotation and the decorative parallax circles.
+function useScrollProgress(ref, neutral = 0) {
+  const [progress, setProgress] = useState(neutral);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || prefersReducedMotion()) return;
+    let raf = null;
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      const vh = window.innerHeight || document.documentElement.clientHeight;
+      const p = (vh - rect.top) / (vh + rect.height);
+      setProgress(Math.min(1, Math.max(0, p)));
+      raf = null;
+    };
+    const onScroll = () => { if (raf == null) raf = requestAnimationFrame(measure); };
+    measure();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [neutral, ref]);
+  return progress;
+}
+
+// 0..1 progress of an element scrolling OUT past the top of the viewport
+// (0 = top of element at top of viewport, 1 = scrolled past its own height).
+// Used for the hero's tilt-back-and-fade exit.
+function useExitProgress(ref) {
+  const [progress, setProgress] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (prefersReducedMotion()) return;
+    let raf = null;
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      const p = -rect.top / rect.height;
+      setProgress(Math.min(1, Math.max(0, p)));
+      raf = null;
+    };
+    const onScroll = () => { if (raf == null) raf = requestAnimationFrame(measure); };
+    measure();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [ref]);
+  return progress;
+}
+
+// Whole-document scroll progress, for the navbar's progress bar.
+function useDocScrollProgress() {
+  const [progress, setProgress] = useState(0);
+  useEffect(() => {
+    let raf = null;
+    const measure = () => {
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      const height = document.documentElement.scrollHeight - window.innerHeight;
+      setProgress(height > 0 ? Math.min(1, Math.max(0, scrollTop / height)) : 0);
+      raf = null;
+    };
+    const onScroll = () => { if (raf == null) raf = requestAnimationFrame(measure); };
+    measure();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+  return progress;
+}
+
+// Wraps a block with a fade + 3D rise (or swing/zoom variant) that plays once
+// it scrolls into view.
+function Reveal({ children, variant, className = '', delay = 0 }) {
+  const [ref, isIn] = useInView();
+  const variantClass = variant ? `lp-${variant}` : '';
+  return (
+    <div
+      ref={ref}
+      className={`lp-reveal-js ${variantClass} ${isIn ? 'is-in' : ''} ${className}`.trim()}
+      style={delay ? { transitionDelay: `${delay}ms` } : undefined}
+    >
+      {children}
+    </div>
+  );
+}
+
 const NAV_LINKS = [
   { href: '#home', label: 'Home' },
   { href: '#about', label: 'About Us' },
@@ -83,10 +207,14 @@ function Landing() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
   const heroRef = useRef(null);
+  const aboutRef = useRef(null);
+  const trustRef = useRef(null);
+  const cubeWrapRef = useRef(null);
+  const ctaRef = useRef(null);
   const reducedMotionRef = useRef(false);
 
   useEffect(() => {
-    reducedMotionRef.current = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    reducedMotionRef.current = prefersReducedMotion();
   }, []);
 
   const handleHeroMouseMove = (e) => {
@@ -97,6 +225,25 @@ function Landing() {
     setTilt({ rx: -(py - 0.5) * 12, ry: (px - 0.5) * 16 });
   };
   const handleHeroMouseLeave = () => setTilt({ rx: 0, ry: 0 });
+
+  const docProgress = useDocScrollProgress();
+  const heroExit = useExitProgress(heroRef);
+  const aboutParallax = useScrollProgress(aboutRef, 0.5);
+  const trustParallax = useScrollProgress(trustRef, 0.5);
+  const ctaParallax = useScrollProgress(ctaRef, 0.5);
+  const cubeProgress = useScrollProgress(cubeWrapRef, 0.5);
+
+  // Hover tilt on the cube, same mouse-tracked pattern as the hero stage --
+  // on top of (not instead of) its scroll-driven spin.
+  const [cubeTilt, setCubeTilt] = useState({ rx: 0, ry: 0 });
+  const handleCubeMouseMove = (e) => {
+    if (reducedMotionRef.current || !cubeWrapRef.current) return;
+    const rect = cubeWrapRef.current.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width;
+    const py = (e.clientY - rect.top) / rect.height;
+    setCubeTilt({ rx: -(py - 0.5) * 24, ry: (px - 0.5) * 36 });
+  };
+  const handleCubeMouseLeave = () => setCubeTilt({ rx: 0, ry: 0 });
 
   return (
     <div className="min-h-screen bg-white text-slate-700" style={{ fontFamily: "'Figtree', sans-serif" }}>
@@ -147,7 +294,7 @@ function Landing() {
         )}
 
         {/* Scroll progress bar along the navbar's bottom edge */}
-        <div className="h-[3px] bg-teal-700 lp-progress" aria-hidden="true" />
+        <div className="h-[3px] bg-teal-700 lp-progress" style={{ transform: `scaleX(${docProgress})` }} aria-hidden="true" />
       </header>
 
       <main>
@@ -159,7 +306,7 @@ function Landing() {
           onMouseLeave={handleHeroMouseLeave}
           className="relative overflow-hidden"
         >
-          {/* Parallax blurred circles */}
+          {/* Parallax blurred circles (mouse-driven) */}
           <div
             aria-hidden="true"
             className="absolute -top-20 -left-20 w-96 h-96 rounded-full bg-teal-200/40 blur-3xl pointer-events-none"
@@ -171,7 +318,13 @@ function Landing() {
             style={{ transform: `translate3d(${-tilt.ry * 1.6}px, ${tilt.rx * 1.6}px, 0)` }}
           />
 
-          <div className="lp-hero-exit max-w-7xl mx-auto px-6 sm:px-8 pt-16 sm:pt-24 pb-24 grid lg:grid-cols-2 gap-14 items-center relative">
+          <div
+            className="max-w-7xl mx-auto px-6 sm:px-8 pt-16 sm:pt-24 pb-24 grid lg:grid-cols-2 gap-14 items-center relative"
+            style={{
+              opacity: 1 - heroExit * 1.4,
+              transform: `perspective(1200px) rotateX(${heroExit * 10}deg) translateY(${-heroExit * 60}px)`,
+            }}
+          >
             <div>
               <span className="inline-block text-xs font-semibold tracking-wide uppercase bg-teal-50 text-teal-700 px-3.5 py-1.5 rounded-full">
                 Mental wellness for Cebu City communities
@@ -246,18 +399,20 @@ function Landing() {
         </section>
 
         {/* ===== About Us ===== */}
-        <section id="about" className="relative overflow-hidden py-24 bg-teal-50/40">
+        <section id="about" ref={aboutRef} className="relative overflow-hidden py-24 bg-teal-50/40">
           <div
             aria-hidden="true"
-            className="lp-parallax-down absolute -top-10 left-[-4rem] w-72 h-72 rounded-full bg-teal-200/40 blur-3xl pointer-events-none"
+            className="absolute -top-10 -left-16 w-72 h-72 rounded-full bg-teal-200/40 blur-3xl pointer-events-none"
+            style={{ transform: `translateY(${140 - aboutParallax * 280}px)` }}
           />
           <div
             aria-hidden="true"
-            className="lp-parallax-up absolute bottom-[-4rem] right-[-4rem] w-80 h-80 rounded-full bg-teal-100/60 blur-3xl pointer-events-none"
+            className="absolute -bottom-16 -right-16 w-80 h-80 rounded-full bg-teal-100/60 blur-3xl pointer-events-none"
+            style={{ transform: `translateY(${-140 + aboutParallax * 280}px)` }}
           />
 
           <div className="max-w-7xl mx-auto px-6 sm:px-8 relative">
-            <div className="lp-reveal max-w-2xl">
+            <Reveal className="max-w-2xl">
               <p className="text-xs font-semibold tracking-wide uppercase text-teal-700">About Us</p>
               <h2 className="mt-3 font-extrabold text-3xl sm:text-4xl text-slate-900">Why OpenUp exists</h2>
               <p className="mt-5 text-slate-600 leading-relaxed">
@@ -267,7 +422,7 @@ function Landing() {
                 their communities -- but most don’t yet have the digital tools to do it.
                 OpenUp is built to close that gap.
               </p>
-            </div>
+            </Reveal>
 
             <div className="mt-14 grid sm:grid-cols-3 gap-6">
               {[
@@ -275,13 +430,13 @@ function Landing() {
                 { icon: 'badge', title: 'Licensed psychologists', desc: 'A platform to reach residents who need support, with verified credentials and clear records.' },
                 { icon: 'shieldCheck', title: 'Local government units', desc: 'Anonymized, aggregated insight into community wellness, to guide local mental health programs.' },
               ].map((c, i) => (
-                <div key={c.title} className={`lp-reveal lp-reveal-${i + 1} lp-tilt bg-white rounded-[20px] shadow-sm p-7`}>
+                <Reveal key={c.title} delay={i * 80} className="lp-tilt bg-white rounded-[20px] shadow-sm p-7">
                   <span className="inline-flex w-12 h-12 rounded-xl bg-teal-50 text-teal-700 items-center justify-center">
                     <SvgIcon name={c.icon} className="w-6 h-6" />
                   </span>
                   <h3 className="mt-4 font-bold text-lg text-slate-900">{c.title}</h3>
                   <p className="mt-2 text-sm text-slate-600">{c.desc}</p>
-                </div>
+                </Reveal>
               ))}
             </div>
           </div>
@@ -290,67 +445,84 @@ function Landing() {
         {/* ===== Features ===== */}
         <section id="features" className="py-24">
           <div className="max-w-7xl mx-auto px-6 sm:px-8">
-            <div className="lp-reveal max-w-xl mx-auto text-center">
+            <Reveal className="max-w-xl mx-auto text-center">
               <p className="text-xs font-semibold tracking-wide uppercase text-teal-700">Features</p>
               <h2 className="mt-3 font-extrabold text-3xl sm:text-4xl text-slate-900">Everything you need, in one place</h2>
-            </div>
+            </Reveal>
 
             <div className="mt-14 grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
               {FEATURES.map((f, i) => (
-                <div
+                <Reveal
                   key={f.title}
-                  className={`lp-reveal lp-reveal-${(i % 3) + 1} ${i % 2 === 0 ? 'lp-tilt' : 'lp-tilt-alt'} bg-white border border-slate-100 rounded-[20px] shadow-sm p-6`}
+                  delay={(i % 4) * 70}
+                  className={`${i % 2 === 0 ? 'lp-tilt' : 'lp-tilt-alt'} bg-white border border-slate-100 rounded-[20px] shadow-sm p-6`}
                 >
                   <span className="inline-flex w-11 h-11 rounded-xl bg-teal-50 text-teal-700 items-center justify-center">
                     <SvgIcon name={f.icon} className="w-5 h-5" />
                   </span>
                   <h3 className="mt-4 font-bold text-slate-900">{f.title}</h3>
                   <p className="mt-1.5 text-sm text-slate-600">{f.desc}</p>
-                </div>
+                </Reveal>
               ))}
             </div>
 
-            <div className="lp-reveal mt-8 bg-teal-900 text-teal-50 rounded-[20px] p-6 sm:p-7 text-sm leading-relaxed">
+            <Reveal className="mt-8 bg-teal-900 text-teal-50 rounded-[20px] p-6 sm:p-7 text-sm leading-relaxed">
               <span className="font-bold text-white">For LGUs: </span>
               an anonymized barangay heatmap, auto-generated accomplishment reports, Care
               Credits, and funding analytics -- all in one dashboard.
-            </div>
+            </Reveal>
           </div>
         </section>
 
         {/* ===== How It Works ===== */}
         <section id="how-it-works" className="py-24 bg-teal-50/40">
           <div className="max-w-7xl mx-auto px-6 sm:px-8">
-            <div className="lp-reveal max-w-xl mx-auto text-center">
+            <Reveal className="max-w-xl mx-auto text-center">
               <p className="text-xs font-semibold tracking-wide uppercase text-teal-700">How It Works</p>
               <h2 className="mt-3 font-extrabold text-3xl sm:text-4xl text-slate-900">Three simple steps</h2>
-            </div>
+            </Reveal>
 
             <div className="mt-14 grid sm:grid-cols-3 gap-8">
               {STEPS.map((s, i) => (
-                <div key={s.n} className={i % 2 === 0 ? 'lp-swing-left' : 'lp-swing-right'}>
+                <Reveal key={s.n} variant={i % 2 === 0 ? 'swing-left' : 'swing-right'}>
                   <div className="lp-tilt bg-white rounded-[20px] shadow-sm p-7 h-full">
                     <span className="font-extrabold text-3xl text-teal-700/30">{s.n}</span>
                     <h3 className="mt-3 font-bold text-lg text-slate-900">{s.title}</h3>
                     <p className="mt-2 text-sm text-slate-600">{s.desc}</p>
                   </div>
-                </div>
+                </Reveal>
               ))}
             </div>
           </div>
         </section>
 
         {/* ===== Trust and Safety ===== */}
-        <section id="trust" className="relative overflow-hidden py-24 bg-teal-900 text-white">
+        <section id="trust" ref={trustRef} className="relative overflow-hidden py-24 bg-teal-900 text-white">
           <div
             aria-hidden="true"
-            className="lp-parallax-up absolute -top-24 -left-24 w-80 h-80 rounded-full bg-teal-700/30 blur-3xl pointer-events-none"
+            className="absolute -top-24 -left-24 w-80 h-80 rounded-full bg-teal-700/30 blur-3xl pointer-events-none"
+            style={{ transform: `translateY(${-140 + trustParallax * 280}px)` }}
           />
           <div className="max-w-7xl mx-auto px-6 sm:px-8 grid lg:grid-cols-2 gap-16 items-center relative">
             {/* 3D cube: a real box, not flat cards -- resting at an angle so two
-                faces are always in view, spinning further as the section scrolls. */}
-            <div className="flex justify-center" style={{ perspective: '1200px' }} aria-hidden="true">
-              <div className="lp-cube-rig relative w-[200px] h-[200px]" style={{ transformStyle: 'preserve-3d' }}>
+                faces are always in view, and rotating further as you scroll
+                through the section (driven by scroll position, not CSS timelines). */}
+            <div
+              ref={cubeWrapRef}
+              onMouseMove={handleCubeMouseMove}
+              onMouseLeave={handleCubeMouseLeave}
+              className="flex justify-center cursor-pointer"
+              style={{ perspective: '1200px' }}
+              aria-hidden="true"
+            >
+              <div
+                className="relative w-[200px] h-[200px]"
+                style={{
+                  transformStyle: 'preserve-3d',
+                  transition: 'transform 150ms ease-out',
+                  transform: `rotateX(${-18 + cubeTilt.rx}deg) rotateY(${-40 + cubeProgress * 360 + cubeTilt.ry}deg)`,
+                }}
+              >
                 {[
                   { label: 'Verified', icon: 'shield', bg: '#0f766e', rot: 0 },
                   { label: 'Anonymous', icon: 'chat', bg: '#0d9488', rot: 90 },
@@ -384,13 +556,13 @@ function Landing() {
 
               <div className="mt-8 grid sm:grid-cols-2 gap-5">
                 {TRUST_CARDS.map((c, i) => (
-                  <div key={c.title} className={`lp-reveal lp-reveal-${(i % 3) + 1} lp-tilt bg-teal-800/60 border border-teal-700/60 rounded-[20px] p-5`}>
+                  <Reveal key={c.title} delay={i * 80} className="lp-tilt bg-teal-800/60 border border-teal-700/60 rounded-[20px] p-5">
                     <span className="inline-flex w-10 h-10 rounded-xl bg-teal-700/60 text-teal-100 items-center justify-center">
                       <SvgIcon name={c.icon} className="w-5 h-5" />
                     </span>
                     <h3 className="mt-3 font-bold text-sm text-white">{c.title}</h3>
                     <p className="mt-1.5 text-xs text-teal-100/80">{c.desc}</p>
-                  </div>
+                  </Reveal>
                 ))}
               </div>
 
@@ -405,12 +577,12 @@ function Landing() {
         {/* ===== FAQ ===== */}
         <section id="faq" className="py-24 bg-teal-50/40">
           <div className="max-w-3xl mx-auto px-6 sm:px-8">
-            <div className="lp-reveal text-center">
+            <Reveal className="text-center">
               <p className="text-xs font-semibold tracking-wide uppercase text-teal-700">FAQ</p>
               <h2 className="mt-3 font-extrabold text-3xl sm:text-4xl text-slate-900">Common questions</h2>
-            </div>
+            </Reveal>
 
-            <div className="lp-reveal mt-12 space-y-3">
+            <Reveal className="mt-12 space-y-3">
               {FAQS.map((f) => (
                 <details key={f.q} className="group bg-white rounded-2xl shadow-sm p-5 open:shadow-md transition-shadow">
                   <summary className="flex items-center justify-between gap-4 cursor-pointer list-none font-semibold text-slate-900">
@@ -420,17 +592,18 @@ function Landing() {
                   <p className="mt-3 text-sm text-slate-600 leading-relaxed">{f.a}</p>
                 </details>
               ))}
-            </div>
+            </Reveal>
           </div>
         </section>
 
         {/* ===== Final CTA ===== */}
-        <section className="relative overflow-hidden py-24 bg-teal-900 text-white">
+        <section ref={ctaRef} className="relative overflow-hidden py-24 bg-teal-900 text-white">
           <div
             aria-hidden="true"
-            className="lp-parallax-down absolute -top-16 right-[-5rem] w-80 h-80 rounded-full bg-teal-700/40 blur-3xl pointer-events-none"
+            className="absolute -top-16 -right-20 w-80 h-80 rounded-full bg-teal-700/40 blur-3xl pointer-events-none"
+            style={{ transform: `translateY(${140 - ctaParallax * 280}px)` }}
           />
-          <div className="lp-cta-zoom max-w-3xl mx-auto px-6 sm:px-8 text-center relative">
+          <Reveal variant="cta-zoom" className="max-w-3xl mx-auto px-6 sm:px-8 text-center relative">
             <h2 className="font-extrabold text-3xl sm:text-4xl">Ready to get started?</h2>
             <p className="mt-4 text-teal-100">
               Create your account and start your journey to better mental wellness today.
@@ -443,7 +616,7 @@ function Landing() {
                 Explore Our Services
               </a>
             </div>
-          </div>
+          </Reveal>
         </section>
       </main>
 

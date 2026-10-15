@@ -148,6 +148,13 @@ textarea:focus-visible,
    Landing page only -- 3D hero rig, scroll-driven reveals, trust
    cube, parallax. Scoped to lp-* classes so nothing here touches
    the rest of the app.
+
+   Reveals/parallax/the cube's rotation are driven from React (scroll
+   position + IntersectionObserver, see Landing.jsx), not CSS
+   scroll-timelines -- animation-timeline: view()/scroll() has patchy
+   browser support and silently does nothing where it's missing. The
+   CSS below only supplies the *resting* transform (pre-reveal) and
+   the transition that animates toward .is-in / inline style changes.
    ============================================================ */
 
 .lp-hero-wrap { perspective: 1400px; }
@@ -166,110 +173,35 @@ textarea:focus-visible,
 .lp-float-c { animation: lp-bob-c 4.2s ease-in-out infinite; }
 .lp-float-d { animation: lp-bob-d 7.2s ease-in-out infinite; }
 
-/* Scroll progress bar along the navbar's bottom edge */
-.lp-progress { transform-origin: left; transform: scaleX(0); }
-@keyframes lp-progress-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-@supports (animation-timeline: scroll(root)) {
-  .lp-progress {
-    animation: lp-progress-fill linear;
-    animation-timeline: scroll(root);
-  }
-}
+/* Scroll progress bar along the navbar's bottom edge -- width set via inline
+   style from useDocScrollProgress(); this just smooths frame-to-frame. */
+.lp-progress { transform-origin: left; transition: transform 80ms linear; }
 
-/* Generic scroll-reveal: 3D rise, staggered within a row */
-@keyframes lp-reveal-in {
-  from { opacity: 0; transform: perspective(1200px) rotateX(26deg) translateY(70px) scale(.94); }
-  to { opacity: 1; transform: perspective(1200px) rotateX(0deg) translateY(0) scale(1); }
+/* Generic scroll-reveal: 3D rise. React's Reveal component toggles .is-in
+   once the element (observed via IntersectionObserver) enters the viewport. */
+.lp-reveal-js {
+  opacity: 0;
+  transform: perspective(1200px) rotateX(26deg) translateY(70px) scale(.94);
+  transition: opacity 700ms cubic-bezier(.2,.8,.2,1), transform 700ms cubic-bezier(.2,.8,.2,1);
+  will-change: transform, opacity;
 }
-@supports (animation-timeline: view()) {
-  .lp-reveal {
-    animation: lp-reveal-in linear backwards;
-    animation-timeline: view();
-    animation-range: entry 0% entry 55%;
-  }
-  .lp-reveal-1 { animation-range: entry 8% entry 63%; }
-  .lp-reveal-2 { animation-range: entry 16% entry 71%; }
-  .lp-reveal-3 { animation-range: entry 24% entry 79%; }
+.lp-reveal-js.is-in {
+  opacity: 1;
+  transform: perspective(1200px) rotateX(0deg) translateY(0) scale(1);
 }
 
 /* How It Works: swing in from left/right */
-@keyframes lp-swing-left-in {
-  from { opacity: 0; transform: perspective(1200px) rotateY(-50deg) translateX(-40px); }
-  to { opacity: 1; transform: perspective(1200px) rotateY(0) translateX(0); }
-}
-@keyframes lp-swing-right-in {
-  from { opacity: 0; transform: perspective(1200px) rotateY(50deg) translateX(40px); }
-  to { opacity: 1; transform: perspective(1200px) rotateY(0) translateX(0); }
-}
-@supports (animation-timeline: view()) {
-  .lp-swing-left {
-    animation: lp-swing-left-in linear backwards;
-    animation-timeline: view();
-    animation-range: entry 0% entry 60%;
-  }
-  .lp-swing-right {
-    animation: lp-swing-right-in linear backwards;
-    animation-timeline: view();
-    animation-range: entry 0% entry 60%;
-  }
-}
+.lp-reveal-js.lp-swing-left { transform: perspective(1200px) rotateY(-50deg) translateX(-40px); }
+.lp-reveal-js.lp-swing-left.is-in { transform: perspective(1200px) rotateY(0) translateX(0); }
+.lp-reveal-js.lp-swing-right { transform: perspective(1200px) rotateY(50deg) translateX(40px); }
+.lp-reveal-js.lp-swing-right.is-in { transform: perspective(1200px) rotateY(0) translateX(0); }
 
 /* Final CTA: translateZ zoom-in */
-@keyframes lp-cta-zoom-in {
-  from { opacity: 0; transform: perspective(1200px) translateZ(-200px) scale(.85); }
-  to { opacity: 1; transform: perspective(1200px) translateZ(0) scale(1); }
-}
-@supports (animation-timeline: view()) {
-  .lp-cta-zoom {
-    animation: lp-cta-zoom-in linear backwards;
-    animation-timeline: view();
-    animation-range: entry 0% entry 60%;
-  }
-}
+.lp-reveal-js.lp-cta-zoom { transform: perspective(1200px) translateZ(-200px) scale(.85); }
+.lp-reveal-js.lp-cta-zoom.is-in { transform: perspective(1200px) translateZ(0) scale(1); }
 
-/* Hero exit: tilt back and fade as it scrolls out of view */
-@keyframes lp-hero-exit-out {
-  from { opacity: 1; transform: perspective(1200px) rotateX(0) translateY(0); }
-  to { opacity: 0; transform: perspective(1200px) rotateX(10deg) translateY(-60px); }
-}
-@supports (animation-timeline: view()) {
-  .lp-hero-exit {
-    animation: lp-hero-exit-out linear both;
-    animation-timeline: view();
-    animation-range: exit 0% exit 100%;
-  }
-}
-
-/* Trust cube rotation across the section */
-@keyframes lp-cube-spin {
-  from { transform: rotateX(-18deg) rotateY(-40deg); }
-  to { transform: rotateX(-18deg) rotateY(320deg); }
-}
-@supports (animation-timeline: view()) {
-  .lp-cube-rig {
-    animation: lp-cube-spin linear both;
-    animation-timeline: view();
-    animation-range: cover 0% cover 100%;
-  }
-}
-
-/* Parallax decorative circles (About + CTA sections) */
-@keyframes lp-parallax-down-move { from { transform: translateY(140px); } to { transform: translateY(-140px); } }
-@keyframes lp-parallax-up-move { from { transform: translateY(-140px); } to { transform: translateY(140px); } }
-@supports (animation-timeline: view()) {
-  .lp-parallax-down {
-    animation: lp-parallax-down-move linear both;
-    animation-timeline: view();
-    animation-range: cover 0% cover 100%;
-  }
-  .lp-parallax-up {
-    animation: lp-parallax-up-move linear both;
-    animation-timeline: view();
-    animation-range: cover 0% cover 100%;
-  }
-}
-
-/* Hover tilt for feature/card tiles + button lift */
+/* Hover tilt for feature/card tiles + button lift -- plain CSS :hover, so
+   this always works regardless of scroll-timeline support. */
 .lp-tilt { transition: transform 220ms ease, box-shadow 220ms ease; }
 .lp-tilt:hover { transform: perspective(900px) rotateX(7deg) rotateY(-8deg) translateY(-8px); box-shadow: 0 20px 40px rgba(15, 118, 110, 0.25); }
 .lp-tilt-alt:hover { transform: perspective(900px) rotateX(7deg) rotateY(8deg) translateY(-8px); }
@@ -277,17 +209,8 @@ textarea:focus-visible,
 .lp-btn-lift:hover { transform: translateZ(10px) translateY(-2px); box-shadow: 0 14px 28px rgba(15, 118, 110, 0.3); }
 
 @media (prefers-reduced-motion: reduce) {
-  .lp-float-a, .lp-float-b, .lp-float-c, .lp-float-d,
-  .lp-progress, .lp-reveal, .lp-swing-left, .lp-swing-right,
-  .lp-cta-zoom, .lp-hero-exit, .lp-cube-rig,
-  .lp-parallax-down, .lp-parallax-up {
-    animation: none !important;
-    opacity: 1 !important;
-    transform: none !important;
-  }
-  .lp-tilt:hover, .lp-tilt-alt:hover, .lp-btn-lift:hover {
-    transform: none !important;
-    box-shadow: none !important;
-  }
+  .lp-float-a, .lp-float-b, .lp-float-c, .lp-float-d { animation: none !important; }
+  .lp-reveal-js { transition: none !important; opacity: 1 !important; transform: none !important; }
+  .lp-tilt:hover, .lp-tilt-alt:hover, .lp-btn-lift:hover { transform: none !important; box-shadow: none !important; }
   .lp-hero-rig { transform: none !important; transition: none !important; }
 }

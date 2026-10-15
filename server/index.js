@@ -2025,6 +2025,52 @@ app.get('/admin/escalations', requireAuth, requireRole('admin'), async (req, res
   res.json(data);
 });
 
+// GET /admin/system-health — real, checkable signals only. No fabricated
+// "99.98% uptime" or invented error rate -- there's no monitoring/APM
+// infrastructure in this app to source that from. What IS real:
+//   - database: a live query against Supabase just succeeded or it didn't.
+//   - integrations_configured: whether each external service's credentials
+//     are actually present in this environment (not whether the service is
+//     currently reachable -- a cheap, honest proxy).
+//   - care_credit_ledger: reuses the same reconciliation check /care-credits/
+//     reconciliation already does, platform-wide -- a genuine data-integrity
+//     signal, not a vanity metric.
+//   - process_uptime_seconds: this Node process's own uptime (process.uptime()),
+//     labeled as exactly that -- not a platform-wide SLA claim, since Render's
+//     free tier can restart this process at any time.
+app.get('/admin/system-health', requireAuth, requireRole('admin'), async (req, res) => {
+  const { error: dbError } = await supabase.from('Barangay').select('barangay_id').limit(1);
+
+  const { data: credits, error: creditsError } = await supabase
+    .from('Care_Credit')
+    .select('credit_id, status');
+  let ledger = { reconciled: null, total_issued: 0, orphaned_used_credits: 0 };
+  if (!creditsError) {
+    const usedCreditIds = credits.filter((c) => c.status === 'used').map((c) => c.credit_id);
+    let linkedIds = new Set();
+    if (usedCreditIds.length > 0) {
+      const { data: linkedBookings } = await supabase
+        .from('Booking')
+        .select('care_credit_id')
+        .in('care_credit_id', usedCreditIds);
+      linkedIds = new Set((linkedBookings || []).map((b) => b.care_credit_id));
+    }
+    const orphaned = usedCreditIds.filter((id) => !linkedIds.has(id)).length;
+    ledger = { reconciled: orphaned === 0, total_issued: credits.length, orphaned_used_credits: orphaned };
+  }
+
+  res.json({
+    database: dbError ? 'offline' : 'online',
+    process_uptime_seconds: Math.round(process.uptime()),
+    integrations_configured: {
+      ai_companion: !!process.env.HUGGINGFACE_API_KEY,
+      payments: !!process.env.PAYMONGO_SECRET_KEY,
+      video_sessions: !!(process.env.JAAS_APP_ID && process.env.JAAS_KEY_ID),
+    },
+    care_credit_ledger: ledger,
+  });
+});
+
 // GET /admin/bookings?status=pending|confirmed|all (default: all except cancelled/declined)
 app.get('/admin/bookings', requireAuth, requireRole('admin'), async (req, res) => {
   const status = req.query.status;

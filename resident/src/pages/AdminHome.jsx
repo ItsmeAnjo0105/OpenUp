@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   IconUsers, IconStethoscope, IconBuildingBank, IconClipboardCheck, IconAlertTriangle,
+  IconHeartbeat, IconDatabase, IconPlugConnected, IconCircleCheck, IconCircleX,
 } from '@tabler/icons-react';
 import AdminLayout from '../components/AdminLayout';
 import AdminTopBar from '../components/AdminTopBar';
@@ -12,6 +13,7 @@ function AdminHome() {
   const [pending, setPending] = useState([]);
   const [lguAccounts, setLguAccounts] = useState([]);
   const [escalations, setEscalations] = useState([]);
+  const [health, setHealth] = useState(null);
   const [error, setError] = useState('');
   const user = getStoredUser();
 
@@ -21,13 +23,21 @@ function AdminHome() {
       fetch(`${API_URL}/admin/psychologists?status=pending`, { headers: authHeader() }).then((res) => res.json().then((data) => ({ ok: res.ok, data }))),
       fetch(`${API_URL}/admin/lgu-accounts`, { headers: authHeader() }).then((res) => res.json().then((data) => ({ ok: res.ok, data }))),
       fetch(`${API_URL}/admin/escalations`, { headers: authHeader() }).then((res) => res.json().then((data) => ({ ok: res.ok, data }))),
-    ]).then(([usersRes, pendingRes, lguRes, escRes]) => {
+      fetch(`${API_URL}/admin/system-health`, { headers: authHeader() }).then((res) => res.json().then((data) => ({ ok: res.ok, data }))),
+    ]).then(([usersRes, pendingRes, lguRes, escRes, healthRes]) => {
       if (usersRes.ok && Array.isArray(usersRes.data)) setUsers(usersRes.data);
       if (pendingRes.ok && Array.isArray(pendingRes.data)) setPending(pendingRes.data);
       if (lguRes.ok && Array.isArray(lguRes.data)) setLguAccounts(lguRes.data);
       if (escRes.ok && Array.isArray(escRes.data)) setEscalations(escRes.data);
+      if (healthRes.ok) setHealth(healthRes.data);
     }).catch(() => setError('Could not reach the server.'));
   }, []);
+
+  const uptimeLabel = (seconds) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
 
   const residentCount = users.filter((u) => u.role === 'resident').length;
   const psychologistCount = users.filter((u) => u.role === 'psychologist').length;
@@ -67,6 +77,54 @@ function AdminHome() {
         </Link>
       </div>
 
+      {health && (
+        <div className="bg-brand-surface rounded-2xl shadow-sm p-6 mb-6">
+          <h2 className="font-display text-lg font-semibold mb-1 flex items-center gap-2">
+            <IconHeartbeat size={18} className="text-brand-primary" /> System health
+          </h2>
+          <p className="text-xs text-brand-ink/50 mb-4">
+            Real, checkable signals only -- no invented uptime percentage or error rate, since
+            there's no monitoring infrastructure in this app to source one from.
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+            <HealthItem
+              icon={<IconDatabase size={16} />}
+              label="Database"
+              ok={health.database === 'online'}
+              detail={health.database === 'online' ? 'Online' : 'Offline'}
+            />
+            <HealthItem
+              icon={<IconPlugConnected size={16} />}
+              label="AI Companion"
+              ok={health.integrations_configured.ai_companion}
+              detail={health.integrations_configured.ai_companion ? 'Configured' : 'Not configured'}
+            />
+            <HealthItem
+              icon={<IconPlugConnected size={16} />}
+              label="Payments"
+              ok={health.integrations_configured.payments}
+              detail={health.integrations_configured.payments ? 'Configured' : 'Not configured'}
+            />
+            <HealthItem
+              icon={<IconPlugConnected size={16} />}
+              label="Video sessions"
+              ok={health.integrations_configured.video_sessions}
+              detail={health.integrations_configured.video_sessions ? 'Configured' : 'Not configured'}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-brand-ink/60 pt-3 border-t border-brand-ink/10">
+            <span>
+              Care Credit ledger:{' '}
+              {health.care_credit_ledger.reconciled === null ? 'Unknown' : health.care_credit_ledger.reconciled
+                ? <span className="text-green-700 font-medium">Reconciled</span>
+                : <span className="text-red-600 font-medium">{health.care_credit_ledger.orphaned_used_credits} orphaned credit(s)</span>}
+              {' '}({health.care_credit_ledger.total_issued} total issued)
+            </span>
+            <span>Server process uptime: {uptimeLabel(health.process_uptime_seconds)}</span>
+          </div>
+        </div>
+      )}
+
       <div className="bg-purple-50 border border-purple-200 rounded-2xl p-6">
         <h2 className="font-display text-lg font-semibold text-purple-900 mb-1 flex items-center gap-2">
           <IconAlertTriangle size={18} /> Emergency escalations
@@ -96,6 +154,23 @@ function AdminHome() {
         )}
       </div>
     </AdminLayout>
+  );
+}
+
+function HealthItem({ icon, label, ok, detail }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <p className="text-xs text-brand-ink/50">{label}</p>
+        <p className="text-sm font-medium flex items-center gap-1">
+          {ok ? <IconCircleCheck size={13} className="text-green-600" /> : <IconCircleX size={13} className="text-red-600" />}
+          {detail}
+        </p>
+      </div>
+    </div>
   );
 }
 

@@ -14,7 +14,7 @@ function PsychologistLayout({ children }) {
 
   useEffect(() => {
     if (!user || user.role !== 'psychologist') {
-      navigate('/login');
+      navigate('/', { state: { authMode: 'login' } });
       return;
     }
 
@@ -26,7 +26,7 @@ function PsychologistLayout({ children }) {
       .catch(() => {
         localStorage.removeItem('openup_token');
         localStorage.removeItem('openup_user');
-        navigate('/login');
+        navigate('/', { state: { authMode: 'login' } });
       });
   }, []);
 

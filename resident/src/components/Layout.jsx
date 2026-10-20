@@ -16,7 +16,7 @@ function Layout({ children }) {
 
   useEffect(() => {
     if (!user) {
-      navigate('/login');
+      navigate('/', { state: { authMode: 'login' } });
       return;
     }
     if (user.role !== 'resident') {
@@ -32,7 +32,7 @@ function Layout({ children }) {
       .catch(() => {
         localStorage.removeItem('openup_token');
         localStorage.removeItem('openup_user');
-        navigate('/login');
+        navigate('/', { state: { authMode: 'login' } });
       });
   }, []);
 

@@ -30,7 +30,7 @@ function PsychologistTopBar({ showClock = false }) {
   const handleLogout = () => {
     localStorage.removeItem('openup_token');
     localStorage.removeItem('openup_user');
-    navigate('/');
+    navigate('/', { state: { authMode: 'login' } });
   };
 
   return (

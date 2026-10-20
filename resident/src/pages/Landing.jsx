@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import heroPsychologist from '../assets/hero-psychologist.png';
 import { API_URL, dashboardPathForRole } from '../config';
 
@@ -433,8 +433,12 @@ const FAQS = [
 ];
 
 function Landing() {
+  const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [authMode, setAuthMode] = useState(null); // null | 'signup' | 'login'
+  // Logging out, or landing here after a session expired, arrives with
+  // navigate('/', { state: { authMode: 'login' } }) so the inline login card
+  // opens immediately instead of showing the hero again.
+  const [authMode, setAuthMode] = useState(location.state?.authMode || null); // null | 'signup' | 'login'
   const [tilt, setTilt] = useState({ rx: 0, ry: 0 });
   const heroRef = useRef(null);
   const aboutRef = useRef(null);

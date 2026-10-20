@@ -14,7 +14,7 @@ function LguLayout({ children }) {
 
   useEffect(() => {
     if (!user || user.role !== 'lgu') {
-      navigate('/login');
+      navigate('/', { state: { authMode: 'login' } });
       return;
     }
 
@@ -26,7 +26,7 @@ function LguLayout({ children }) {
       .catch(() => {
         localStorage.removeItem('openup_token');
         localStorage.removeItem('openup_user');
-        navigate('/login');
+        navigate('/', { state: { authMode: 'login' } });
       });
   }, []);
 

@@ -37,7 +37,7 @@ function Dashboard() {
 
   useEffect(() => {
     if (!user) {
-      navigate('/login');
+      navigate('/', { state: { authMode: 'login' } });
       return;
     }
 

@@ -42,7 +42,7 @@ function AdminSidebar({ user, sidebarOpen, setSidebarOpen }) {
   const handleLogout = () => {
     localStorage.removeItem('openup_token');
     localStorage.removeItem('openup_user');
-    navigate('/');
+    navigate('/', { state: { authMode: 'login' } });
   };
 
   const initials = (user.name || '?').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();

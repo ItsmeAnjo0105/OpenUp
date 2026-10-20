@@ -40,7 +40,7 @@ function Signup() {
         return;
       }
 
-      navigate('/login');
+      navigate('/', { state: { authMode: 'login' } });
     } catch {
       setError('Could not reach the server. Check your connection.');
       setLoading(false);

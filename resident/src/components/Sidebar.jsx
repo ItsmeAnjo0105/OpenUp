@@ -54,7 +54,7 @@ function Sidebar({ sidebarOpen, setSidebarOpen }) {
   const handleLogout = () => {
     localStorage.removeItem('openup_token');
     localStorage.removeItem('openup_user');
-    navigate('/');
+    navigate('/', { state: { authMode: 'login' } });
   };
 
   const initials = (user?.name || '?')

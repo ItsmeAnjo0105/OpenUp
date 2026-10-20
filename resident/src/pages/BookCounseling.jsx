@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { IconArrowLeft, IconSearch, IconCalendarEvent, IconChevronRight, IconUsersGroup, IconMoodSad, IconMoodEmpty, IconCloudRain, IconHeartHandshake, IconUsers } from '@tabler/icons-react';
+import { IconArrowLeft, IconSearch, IconCalendarEvent, IconChevronRight, IconUsersGroup, IconMoodSad, IconMoodEmpty, IconCloudRain, IconHeartHandshake, IconUsers, IconWallet } from '@tabler/icons-react';
 import Layout from '../components/Layout';
 import PsychologistCard from '../components/PsychologistCard';
 import BookingCalendar from '../components/BookingCalendar';
 import ConfirmDialog from '../components/ConfirmDialog';
-import { API_URL } from '../config';
+import { API_URL, authHeader } from '../config';
 
 const CATEGORIES = [
   { label: 'All', icon: IconUsersGroup },
@@ -30,14 +30,25 @@ function BookCounseling() {
   const [bookingActionError, setBookingActionError] = useState('');
   const [reschedulingId, setReschedulingId] = useState(null);
   const [rescheduleValue, setRescheduleValue] = useState('');
+  const [careCredits, setCareCredits] = useState(null);
+  const [useCredit, setUseCredit] = useState(true);
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
+
+  const loadCareCredits = () => {
+    fetch(`${API_URL}/care-credits/me`, { headers: authHeader() })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => { if (ok) setCareCredits(data); })
+      .catch(() => {});
+  };
 
   useEffect(() => {
     fetch(`${API_URL}/psychologists`)
       .then((res) => res.json())
       .then(setPsychologists)
       .catch(() => {});
+
+    loadCareCredits();
   }, []);
 
   const filteredPsychologists = psychologists.filter((p) => {
@@ -115,6 +126,7 @@ function BookCounseling() {
     setSelected(psychologist);
     setSchedule('');
     setStatus('');
+    setUseCredit((careCredits?.available_count || 0) > 0);
   };
 
   const closeModal = () => {
@@ -125,9 +137,12 @@ function BookCounseling() {
   const handleSubmit = (e) => {
     e.preventDefault();
     const dateLabel = new Date(schedule).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' });
+    const willUseCredit = useCredit && (careCredits?.available_count || 0) > 0;
     setConfirmDialog({
       title: 'Are you sure you want to continue?',
-      message: `You're requesting a session with ${selected.User?.name || 'this psychologist'} on ${dateLabel}. They'll need to accept it first.`,
+      message: `You're requesting a session with ${selected.User?.name || 'this psychologist'} on ${dateLabel}. They'll need to accept it first.${
+        willUseCredit ? ' A Care Credit will be reserved to cover it.' : ''
+      }`,
       confirmLabel: 'Confirm booking',
       destructive: false,
       onConfirm: submitBooking,
@@ -146,6 +161,7 @@ function BookCounseling() {
           resident_id: user.user_id,
           psychologist_id: selected.psychologist_id,
           schedule,
+          use_credit: useCredit,
         }),
       });
       const data = await res.json();
@@ -162,6 +178,7 @@ function BookCounseling() {
           : "Request sent! You'll be notified once the psychologist responds."
       );
       setLoading(false);
+      loadCareCredits();
       setTimeout(() => navigate('/dashboard'), 1800);
     } catch {
       setStatus('Could not reach the server.');
@@ -258,6 +275,33 @@ function BookCounseling() {
                   <label className="text-sm font-medium block mb-2">Pick a date & time</label>
                   <BookingCalendar psychologistId={selected.psychologist_id} onSelect={setSchedule} />
                 </div>
+
+                {careCredits?.available_count > 0 ? (
+                  <div className="flex items-center justify-between gap-3 bg-brand-primary/5 rounded-xl p-4">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <IconWallet size={18} className="text-brand-primary shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">Use a Care Credit</p>
+                        <p className="text-xs text-brand-ink/50">
+                          You have {careCredits.available_count} available · ₱{careCredits.available_amount.toLocaleString()}. Covers this session in full.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setUseCredit((v) => !v)}
+                      aria-pressed={useCredit}
+                      className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${useCredit ? 'bg-brand-primary' : 'bg-brand-ink/20'}`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${useCredit ? 'translate-x-5' : ''}`} />
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-xs text-brand-ink/40 flex items-center gap-1.5">
+                    <IconWallet size={14} className="shrink-0" />
+                    No Care Credits available — this session will need to be paid for once your psychologist accepts.
+                  </p>
+                )}
 
                 {status && <p className="text-sm text-brand-primary font-medium">{status}</p>}
 

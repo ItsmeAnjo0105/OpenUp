@@ -2345,7 +2345,7 @@ app.post('/admin/bookings/:id/reassign', requireAuth, requireRole('admin'), asyn
 // Creates a *request* (status 'pending', credit only reserved) — it isn't confirmed
 // until the psychologist accepts it. See POST /bookings/:id/accept and /decline below.
 app.post('/bookings', async (req, res) => {
-  const { resident_id, psychologist_id, schedule } = req.body;
+  const { resident_id, psychologist_id, schedule, use_credit } = req.body;
 
   if (!resident_id || !psychologist_id || !schedule) {
     return res.status(400).json({ error: 'resident_id, psychologist_id, and schedule are required' });
@@ -2356,6 +2356,7 @@ app.post('/bookings', async (req, res) => {
     p_psychologist_id: psychologist_id,
     p_schedule: schedule,
     p_auto_confirm: false,
+    p_use_credit: use_credit !== false,
   });
 
   if (error) {

@@ -34,6 +34,7 @@ function BookCounseling() {
   const [careCredits, setCareCredits] = useState(null);
   const [useCredit, setUseCredit] = useState(true);
   const [activeInquiry, setActiveInquiry] = useState(null);
+  const [payingId, setPayingId] = useState(null);
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   const loadCareCredits = () => {
@@ -86,6 +87,32 @@ function BookCounseling() {
       loadBookings();
     } catch {
       setBookingActionError('Could not reach the server.');
+    }
+  };
+
+  // Settles a still-pending payment in-app, same as Dashboard's "Pay now"
+  // (POST /payments/:id/simulate -- see that route for why this build doesn't
+  // route through PayMongo). Once paid, this session's Cancel option
+  // disappears on its own -- only Reschedule stays available.
+  const handlePaySession = async (paymentId) => {
+    setBookingActionError('');
+    setPayingId(paymentId);
+    try {
+      const res = await fetch(`${API_URL}/payments/${paymentId}/simulate`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('openup_token')}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setBookingActionError(data.error || 'Could not complete payment.');
+        setPayingId(null);
+        return;
+      }
+      setPayingId(null);
+      loadBookings();
+    } catch {
+      setBookingActionError('Could not reach the server.');
+      setPayingId(null);
     }
   };
 
@@ -368,10 +395,12 @@ function BookCounseling() {
                 <div className="space-y-3">
                   {bookings.map((b) => {
                     const canManage = b.status === 'pending' || b.status === 'confirmed';
-                    const isPaid = b.Payment?.some((p) => p.status === 'paid');
+                    const payment = b.Payment?.[0];
+                    const isPaid = payment?.status === 'paid';
+                    const isPending = payment?.status === 'pending';
                     return (
                       <div key={b.booking_id} className="border border-brand-ink/10 rounded-xl p-4">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
                           <div>
                             <p className="text-sm font-semibold">
                               {b.Psychologist?.User?.name || `Psychologist #${b.psychologist_id}`}
@@ -381,10 +410,21 @@ function BookCounseling() {
                               {' · '}
                               <span className="capitalize">{b.status}</span>
                               {isPaid && <span className="text-green-700"> · Paid</span>}
+                              {isPending && <span className="text-amber-600"> · Payment due</span>}
                             </p>
                           </div>
                           {canManage && (
                             <div className="flex items-center gap-2 shrink-0">
+                              {isPending && (
+                                <button
+                                  onClick={() => handlePaySession(payment.payment_id)}
+                                  disabled={payingId === payment.payment_id}
+                                  className="text-xs font-medium px-3 py-1.5 rounded-full text-white disabled:opacity-60"
+                                  style={{ backgroundColor: '#2b4d3f' }}
+                                >
+                                  {payingId === payment.payment_id ? 'Paying...' : `Pay ₱${Number(payment.amount).toLocaleString()}`}
+                                </button>
+                              )}
                               <button
                                 onClick={() => {
                                   setReschedulingId(reschedulingId === b.booking_id ? null : b.booking_id);

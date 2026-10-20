@@ -2916,12 +2916,19 @@ app.post('/bookings/:id/decline', requireAuth, requireRole('psychologist'), asyn
 app.post('/bookings/:id/cancel', requireAuth, requireRole('resident'), async (req, res) => {
   const { data: booking, error: findError } = await supabase
     .from('Booking')
-    .select('resident_id')
+    .select('resident_id, Payment(status)')
     .eq('booking_id', req.params.id)
     .single();
 
   if (findError || !booking) return res.status(404).json({ error: 'Booking not found' });
   if (booking.resident_id !== req.user.user_id) return res.status(403).json({ error: 'This is not your booking' });
+
+  // Once paid (cash or Care Credit), a session can be rescheduled but not
+  // cancelled -- same no-show/cancellation policy a real counseling practice
+  // would hold psychologists' reserved time against.
+  if (booking.Payment?.some((p) => p.status === 'paid')) {
+    return res.status(409).json({ error: "This session is already paid and can't be cancelled. You can reschedule it instead." });
+  }
 
   const { data, error } = await supabase.rpc('admin_cancel_booking', { p_booking_id: req.params.id });
 

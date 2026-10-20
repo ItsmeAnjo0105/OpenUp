@@ -34,7 +34,6 @@ function BookCounseling() {
   const [careCredits, setCareCredits] = useState(null);
   const [useCredit, setUseCredit] = useState(true);
   const [activeInquiry, setActiveInquiry] = useState(null);
-  const [fallbackPaymentId, setFallbackPaymentId] = useState(null);
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
@@ -129,26 +128,23 @@ function BookCounseling() {
     setSelected(psychologist);
     setSchedule('');
     setStatus('');
-    setFallbackPaymentId(null);
     setUseCredit((careCredits?.available_count || 0) > 0);
   };
 
   const closeModal = () => {
     setSelected(null);
     setStatus('');
-    setFallbackPaymentId(null);
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
     const dateLabel = new Date(schedule).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' });
     const willUseCredit = useCredit && (careCredits?.available_count || 0) > 0;
+    const priceLabel = `₱${Number(selected.session_price).toLocaleString()}`;
     setConfirmDialog({
-      title: 'Are you sure you want to continue?',
-      message: `You're booking a session with ${selected.User?.name || 'this psychologist'} on ${dateLabel}. This is confirmed right away.${
-        willUseCredit ? ' A Care Credit will cover the cost.' : " You'll be taken to payment next."
-      }`,
-      confirmLabel: 'Confirm booking',
+      title: willUseCredit ? 'Use a Care Credit to confirm?' : `Pay ${priceLabel} to confirm?`,
+      message: `${willUseCredit ? 'A Care Credit will cover the cost of' : `You're paying ${priceLabel} for`} your session with ${selected.User?.name || 'this psychologist'} on ${dateLabel}. You can reschedule afterward, but once paid this session can't be cancelled.`,
+      confirmLabel: willUseCredit ? 'Use Care Credit & confirm' : 'Pay & confirm booking',
       destructive: false,
       onConfirm: submitBooking,
     });
@@ -179,7 +175,7 @@ function BookCounseling() {
 
       loadCareCredits();
 
-      // Covered by a Care Credit -- nothing to pay, just confirm and leave.
+      // Covered by a Care Credit -- nothing more to pay.
       if (data.payment?.status === 'paid') {
         setStatus('Session confirmed! Your Care Credit covered the cost.');
         setLoading(false);
@@ -187,59 +183,31 @@ function BookCounseling() {
         return;
       }
 
-      // Not covered -- confirmed, but payment is still owed. Send them
-      // straight to PayMongo checkout, same path Dashboard's "Pay now" uses.
+      // Not covered -- settle it in-app immediately (this build doesn't route
+      // through PayMongo; see POST /payments/:id/simulate).
       if (data.payment?.status === 'pending') {
-        setStatus('Session confirmed! Taking you to payment...');
         try {
-          const checkoutRes = await fetch(`${API_URL}/payments/${data.payment.payment_id}/checkout`, {
+          const payRes = await fetch(`${API_URL}/payments/${data.payment.payment_id}/simulate`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${localStorage.getItem('openup_token')}` },
           });
-          const checkoutData = await checkoutRes.json();
-          if (!checkoutRes.ok) {
-            setStatus(`Session confirmed, but could not start payment: ${checkoutData.error || 'unknown error'}. You can pay from your Dashboard, or simulate payment below for testing.`);
-            setFallbackPaymentId(data.payment.payment_id);
+          const payData = await payRes.json();
+          if (!payRes.ok) {
+            setStatus(`Session confirmed, but payment could not be completed: ${payData.error || 'unknown error'}. You can pay from your Dashboard.`);
             setLoading(false);
             return;
           }
-          window.location.href = checkoutData.checkout_url;
+          setStatus('Payment received! Session confirmed.');
+          setLoading(false);
+          setTimeout(() => navigate('/dashboard'), 1800);
         } catch {
-          setStatus('Session confirmed, but could not reach the payment service. You can pay from your Dashboard, or simulate payment below for testing.');
-          setFallbackPaymentId(data.payment.payment_id);
+          setStatus('Session confirmed, but could not reach the payment service. You can pay from your Dashboard.');
           setLoading(false);
         }
         return;
       }
 
       setStatus('Session confirmed!');
-      setLoading(false);
-      setTimeout(() => navigate('/dashboard'), 1800);
-    } catch {
-      setStatus('Could not reach the server.');
-      setLoading(false);
-    }
-  };
-
-  // Dev-only stand-in for real checkout -- see POST /payments/:id/simulate.
-  // Locks itself out server-side the moment real payment processing is
-  // configured, so this button only ever does anything in a test environment.
-  const simulatePayment = async () => {
-    if (!fallbackPaymentId) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/payments/${fallbackPaymentId}/simulate`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${localStorage.getItem('openup_token')}` },
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setStatus(data.error || 'Could not simulate payment.');
-        setLoading(false);
-        return;
-      }
-      setStatus('Payment simulated (test only). Session fully confirmed!');
-      setFallbackPaymentId(null);
       setLoading(false);
       setTimeout(() => navigate('/dashboard'), 1800);
     } catch {
@@ -361,30 +329,19 @@ function BookCounseling() {
                 ) : (
                   <p className="text-xs text-brand-ink/40 flex items-center gap-1.5">
                     <IconWallet size={14} className="shrink-0" />
-                    No Care Credits available — you'll be taken to payment right after confirming.
+                    No Care Credits available — payment is collected when you confirm.
                   </p>
                 )}
 
                 {status && <p className="text-sm text-brand-primary font-medium">{status}</p>}
 
-                {fallbackPaymentId ? (
-                  <button
-                    type="button"
-                    onClick={simulatePayment}
-                    disabled={loading}
-                    className="w-full border border-brand-primary text-brand-primary py-2.5 rounded-full font-medium hover:bg-brand-primary/5 transition-colors disabled:opacity-60"
-                  >
-                    {loading ? 'Simulating...' : 'Simulate payment (test only)'}
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    disabled={loading || !schedule}
-                    className="w-full bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors disabled:opacity-60"
-                  >
-                    {loading ? 'Booking...' : schedule ? 'Confirm booking' : 'Select a time above'}
-                  </button>
-                )}
+                <button
+                  type="submit"
+                  disabled={loading || !schedule}
+                  className="w-full bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors disabled:opacity-60"
+                >
+                  {loading ? 'Booking...' : schedule ? 'Confirm booking' : 'Select a time above'}
+                </button>
               </form>
             </div>
           </div>
@@ -412,6 +369,7 @@ function BookCounseling() {
                 <div className="space-y-3">
                   {bookings.map((b) => {
                     const canManage = b.status === 'pending' || b.status === 'confirmed';
+                    const isPaid = b.Payment?.some((p) => p.status === 'paid');
                     return (
                       <div key={b.booking_id} className="border border-brand-ink/10 rounded-xl p-4">
                         <div className="flex items-center justify-between">
@@ -423,6 +381,7 @@ function BookCounseling() {
                               {new Date(b.schedule).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}
                               {' · '}
                               <span className="capitalize">{b.status}</span>
+                              {isPaid && <span className="text-green-700"> · Paid</span>}
                             </p>
                           </div>
                           {canManage && (
@@ -436,12 +395,14 @@ function BookCounseling() {
                               >
                                 Reschedule
                               </button>
-                              <button
-                                onClick={() => confirmCancelBooking(b.booking_id)}
-                                className="text-xs font-medium px-3 py-1.5 rounded-full border border-red-300 text-red-600"
-                              >
-                                Cancel
-                              </button>
+                              {!isPaid && (
+                                <button
+                                  onClick={() => confirmCancelBooking(b.booking_id)}
+                                  className="text-xs font-medium px-3 py-1.5 rounded-full border border-red-300 text-red-600"
+                                >
+                                  Cancel
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -463,7 +424,7 @@ function BookCounseling() {
                             </button>
                             {b.status === 'confirmed' && (
                               <p className="text-xs text-brand-ink/50 w-full">
-                                Rescheduling a confirmed session sends it back to your psychologist for re-acceptance.
+                                Your session stays confirmed and paid -- only the time changes.
                               </p>
                             )}
                           </div>

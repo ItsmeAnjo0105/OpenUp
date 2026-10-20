@@ -47,7 +47,6 @@ function Dashboard() {
 
   const [payingId, setPayingId] = useState(null);
   const [payError, setPayError] = useState('');
-  const [simulatePaymentId, setSimulatePaymentId] = useState(null);
   const [bookingActionError, setBookingActionError] = useState('');
   const [reschedulingId, setReschedulingId] = useState(null);
   const [rescheduleValue, setRescheduleValue] = useState('');
@@ -105,34 +104,9 @@ function Dashboard() {
     }
   };
 
+  // This build settles payment in-app directly (see POST /payments/:id/simulate)
+  // rather than routing through PayMongo.
   const handlePay = async (paymentId) => {
-    setPayError('');
-    setPayingId(paymentId);
-    setSimulatePaymentId(null);
-    try {
-      const res = await fetch(`${API_URL}/payments/${paymentId}/checkout`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${localStorage.getItem('openup_token')}` },
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setPayError(`${data.error || 'Could not start checkout.'} You can simulate payment below for testing.`);
-        setSimulatePaymentId(paymentId);
-        setPayingId(null);
-        return;
-      }
-      window.location.href = data.checkout_url;
-    } catch {
-      setPayError('Could not reach the server. You can simulate payment below for testing.');
-      setSimulatePaymentId(paymentId);
-      setPayingId(null);
-    }
-  };
-
-  // Dev-only stand-in for real checkout -- see POST /payments/:id/simulate.
-  // Locks itself out server-side the moment real payment processing is
-  // configured, so this button only ever does anything in a test environment.
-  const handleSimulatePayment = async (paymentId) => {
     setPayError('');
     setPayingId(paymentId);
     try {
@@ -142,11 +116,10 @@ function Dashboard() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setPayError(data.error || 'Could not simulate payment.');
+        setPayError(data.error || 'Could not complete payment.');
         setPayingId(null);
         return;
       }
-      setSimulatePaymentId(null);
       setPayingId(null);
       loadBookings();
     } catch {
@@ -284,6 +257,7 @@ function Dashboard() {
             <div className="space-y-3">
               {bookings.map((b) => {
                 const payment = b.Payment?.[0];
+                const isPaid = payment?.status === 'paid';
                 const canManage = b.status === 'pending' || b.status === 'confirmed';
                 return (
                   <div key={b.booking_id} className="border border-brand-ink/10 rounded-xl p-4">
@@ -306,20 +280,11 @@ function Dashboard() {
                             className="text-xs font-medium px-3 py-1.5 rounded-full bg-brand-primary text-white disabled:opacity-60"
                           >
                             {payingId === payment.payment_id
-                              ? 'Redirecting...'
+                              ? 'Paying...'
                               : `Pay ₱${Number(payment.amount).toLocaleString()}`}
                           </button>
                         )}
-                        {payment && payment.status === 'pending' && simulatePaymentId === payment.payment_id && (
-                          <button
-                            onClick={() => handleSimulatePayment(payment.payment_id)}
-                            disabled={payingId === payment.payment_id}
-                            className="text-xs font-medium px-3 py-1.5 rounded-full border border-brand-primary text-brand-primary disabled:opacity-60"
-                          >
-                            {payingId === payment.payment_id ? 'Simulating...' : 'Simulate payment (test)'}
-                          </button>
-                        )}
-                        {payment && payment.status === 'paid' && (
+                        {isPaid && (
                           <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-green-100 text-green-700">
                             Paid
                           </span>
@@ -335,12 +300,14 @@ function Dashboard() {
                             >
                               Reschedule
                             </button>
-                            <button
-                              onClick={() => confirmCancelBooking(b.booking_id)}
-                              className="text-xs font-medium px-3 py-1.5 rounded-full border border-red-300 text-red-600"
-                            >
-                              Cancel
-                            </button>
+                            {!isPaid && (
+                              <button
+                                onClick={() => confirmCancelBooking(b.booking_id)}
+                                className="text-xs font-medium px-3 py-1.5 rounded-full border border-red-300 text-red-600"
+                              >
+                                Cancel
+                              </button>
+                            )}
                           </>
                         )}
                       </div>
@@ -365,7 +332,7 @@ function Dashboard() {
                     )}
                     {reschedulingId === b.booking_id && b.status === 'confirmed' && (
                       <p className="text-xs text-brand-ink/50 mt-2">
-                        Rescheduling a confirmed session sends it back to your psychologist for re-acceptance.
+                        Your session stays confirmed and paid -- only the time changes.
                       </p>
                     )}
                   </div>

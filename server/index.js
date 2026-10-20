@@ -3744,6 +3744,32 @@ app.get('/users/me', requireAuth, async (req, res) => {
   res.json(data);
 });
 
+// GET /care-credits/me — the logged-in resident's own Care Credit balance.
+// 'available' is spendable now; 'reserved' is held against a pending booking
+// request (released back to 'available' if the psychologist declines); 'used'
+// is spent and excluded here on purpose -- this is a balance, not a ledger.
+app.get('/care-credits/me', requireAuth, requireRole('resident'), async (req, res) => {
+  const { data, error } = await supabase
+    .from('Care_Credit')
+    .select('credit_id, amount, status, created_at')
+    .eq('resident_id', req.user.user_id)
+    .in('status', ['available', 'reserved'])
+    .order('created_at', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  const available = data.filter((c) => c.status === 'available');
+  const reserved = data.filter((c) => c.status === 'reserved');
+
+  res.json({
+    available_count: available.length,
+    available_amount: available.reduce((sum, c) => sum + Number(c.amount), 0),
+    reserved_count: reserved.length,
+    reserved_amount: reserved.reduce((sum, c) => sum + Number(c.amount), 0),
+    credits: data,
+  });
+});
+
 // PATCH /users/me — self-service account update. Changing the password requires
 // current_password to match first; email changes are checked for uniqueness against
 // every OTHER account (not this one, or a same-email "change" would false-positive).

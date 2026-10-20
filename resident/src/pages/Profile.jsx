@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { IconWallet } from '@tabler/icons-react';
 import Layout from '../components/Layout';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { API_URL, authHeader } from '../config';
@@ -14,6 +15,14 @@ function Profile() {
   const [contactForm, setContactForm] = useState({ name: '', relationship: '', phone: '', email: '' });
   const [contactError, setContactError] = useState('');
   const [confirmDialog, setConfirmDialog] = useState(null);
+  const [careCredits, setCareCredits] = useState(null);
+
+  const loadCareCredits = () => {
+    fetch(`${API_URL}/care-credits/me`, { headers: authHeader() })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => { if (ok) setCareCredits(data); })
+      .catch(() => {});
+  };
 
   const loadAccount = () => {
     fetch(`${API_URL}/users/me`, { headers: authHeader() })
@@ -36,7 +45,7 @@ function Profile() {
       .catch(() => {});
   };
 
-  useEffect(() => { loadAccount(); loadContacts(); }, []);
+  useEffect(() => { loadAccount(); loadContacts(); loadCareCredits(); }, []);
 
   const saveAccount = async (e) => {
     e.preventDefault();
@@ -184,6 +193,40 @@ function Profile() {
                 {saving ? 'Saving...' : 'Save changes'}
               </button>
             </form>
+          )}
+        </div>
+
+        <div className="bg-brand-surface rounded-2xl shadow-sm p-6">
+          <h2 className="font-medium mb-1 flex items-center gap-2">
+            <IconWallet size={18} className="text-brand-primary" /> Care Credits
+          </h2>
+          <p className="text-xs text-brand-ink/50 mb-4">
+            Funded by your barangay to help cover counseling sessions.
+          </p>
+
+          {!careCredits ? (
+            <p className="text-sm text-brand-ink/40">Loading…</p>
+          ) : careCredits.available_count === 0 && careCredits.reserved_count === 0 ? (
+            <p className="text-sm text-brand-ink/50">
+              No Care Credits available right now. Check with your barangay about funded counseling sessions.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-3">
+              <div className="flex-1 min-w-36 border border-brand-ink/10 rounded-xl p-4">
+                <p className="text-2xl font-display font-semibold text-brand-primary">{careCredits.available_count}</p>
+                <p className="text-xs text-brand-ink/50 mt-0.5">
+                  Available {careCredits.available_count === 1 ? 'credit' : 'credits'} · ₱{careCredits.available_amount.toLocaleString()}
+                </p>
+              </div>
+              {careCredits.reserved_count > 0 && (
+                <div className="flex-1 min-w-36 border border-brand-ink/10 rounded-xl p-4">
+                  <p className="text-2xl font-display font-semibold text-brand-ink/60">{careCredits.reserved_count}</p>
+                  <p className="text-xs text-brand-ink/50 mt-0.5">
+                    Reserved on a pending booking · ₱{careCredits.reserved_amount.toLocaleString()}
+                  </p>
+                </div>
+              )}
+            </div>
           )}
         </div>
 

@@ -11,6 +11,19 @@ const path = require('path');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 
+// A transient network failure reaching Supabase surfaces as a raw Node/undici
+// error ("TypeError: fetch failed", ECONNRESET, etc.) -- genuinely confusing
+// shown straight to a user on a login screen. Logs the real error for
+// debugging, returns something a person can actually act on.
+function friendlyDbError(error) {
+  console.error('DB error:', error);
+  const msg = (error?.message || '').toLowerCase();
+  if (msg.includes('fetch failed') || msg.includes('econnreset') || msg.includes('etimedout') || msg.includes('enotfound')) {
+    return 'Could not reach the server right now. Please try again in a moment.';
+  }
+  return error?.message || 'Something went wrong.';
+}
+
 // Prefer a plain env var holding the PEM contents directly (reliable on any host —
 // no dependency on a platform's "secret file" mount actually being present at boot).
 // Falls back to reading a local file for local dev, where JAAS_PRIVATE_KEY_PATH
@@ -3731,7 +3744,7 @@ app.post('/auth/signup', async (req, res) => {
     .select('user_id, name, email, role, barangay_id, status'); // never return the password
 
   if (error) {
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: friendlyDbError(error) });
   }
 
   const user = data[0];
@@ -3775,7 +3788,7 @@ app.post('/auth/login', async (req, res) => {
     .limit(1);
 
   if (error) {
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: friendlyDbError(error) });
   }
 
   if (!users || users.length === 0) {

@@ -57,6 +57,27 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Pre-booking inquiry chat real-time delivery (same proof-of-participant
+  // pattern as join-booking-chat above, just keyed by the resident/psychologist
+  // pair directly since there's no booking yet).
+  socket.on('join-inquiry-chat', async ({ residentId, psychologistId, token }) => {
+    try {
+      const user = jwt.verify(token, process.env.JWT_SECRET);
+      // A psychologist joining never supplies their own psychologist_id from the
+      // client -- it's resolved from their verified JWT instead, so this can't
+      // be spoofed into joining someone else's thread.
+      let resolvedPsychologistId = psychologistId;
+      if (user.role === 'psychologist') {
+        resolvedPsychologistId = await getOwnPsychologistId(user.user_id);
+      }
+      const role = await getInquiryParticipantRole(residentId, resolvedPsychologistId, user);
+      if (!role || !resolvedPsychologistId) return socket.emit('chat-error', { error: 'Not authorized for this conversation' });
+      socket.join(`inquiry-${residentId}-${resolvedPsychologistId}`);
+    } catch {
+      socket.emit('chat-error', { error: 'Invalid session' });
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('A user disconnected');
   });
@@ -116,6 +137,25 @@ async function getBookingParticipantRole(bookingId, user) {
       .eq('user_id', user.user_id)
       .single();
     if (psychologist && psychologist.psychologist_id === booking.psychologist_id) return 'psychologist';
+  }
+
+  return null;
+}
+
+// Same idea as getBookingParticipantRole, but for a pre-booking Inquiry_Message
+// thread, which has no booking row to look up -- the thread's identity IS the
+// (resident_id, psychologist_id) pair, so this just checks the caller is one
+// of those two people (never trusting a client-supplied role).
+async function getInquiryParticipantRole(residentId, psychologistId, user) {
+  if (user.role === 'resident' && Number(user.user_id) === Number(residentId)) return 'resident';
+
+  if (user.role === 'psychologist') {
+    const { data: psychologist } = await supabase
+      .from('Psychologist')
+      .select('psychologist_id')
+      .eq('user_id', user.user_id)
+      .single();
+    if (psychologist && Number(psychologist.psychologist_id) === Number(psychologistId)) return 'psychologist';
   }
 
   return null;
@@ -3188,6 +3228,139 @@ app.post('/bookings/:id/messages', requireAuth, async (req, res) => {
   }
 
   res.status(201).json({ ...message, sender_name });
+});
+
+// ---- Pre-booking inquiries: a resident messaging a psychologist they haven't
+// booked with yet (the "Message" button on each psychologist card). Separate
+// from the Message table above -- keyed by (resident_id, psychologist_id)
+// directly since there's no booking yet, and never anonymous (both sides are
+// genuinely themselves). ----
+
+// GET/POST /inquiries/:psychologistId/messages — resident side. resident_id is
+// always the caller's own id; psychologistId comes from the URL.
+app.get('/inquiries/:psychologistId/messages', requireAuth, requireRole('resident'), async (req, res) => {
+  const { data, error } = await supabase
+    .from('Inquiry_Message')
+    .select('message_id, sender_role, body, created_at')
+    .eq('resident_id', req.user.user_id)
+    .eq('psychologist_id', req.params.psychologistId)
+    .order('created_at', { ascending: true });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/inquiries/:psychologistId/messages', requireAuth, requireRole('resident'), async (req, res) => {
+  const { body } = req.body;
+  if (!body || !body.trim()) return res.status(400).json({ error: 'body is required' });
+
+  const { data: psychologist } = await supabase
+    .from('Psychologist')
+    .select('psychologist_id, user_id, is_verified')
+    .eq('psychologist_id', req.params.psychologistId)
+    .single();
+  if (!psychologist || !psychologist.is_verified) return res.status(404).json({ error: 'Psychologist not found' });
+
+  const { data, error } = await supabase
+    .from('Inquiry_Message')
+    .insert([{ resident_id: req.user.user_id, psychologist_id: req.params.psychologistId, sender_role: 'resident', body: body.trim() }])
+    .select('message_id, sender_role, body, created_at');
+  if (error) return res.status(500).json({ error: error.message });
+
+  const message = data[0];
+  io.to(`inquiry-${req.user.user_id}-${req.params.psychologistId}`).emit('new-inquiry-message', {
+    resident_id: req.user.user_id,
+    psychologist_id: Number(req.params.psychologistId),
+    ...message,
+  });
+
+  await supabase.from('Notification').insert([{
+    user_id: psychologist.user_id,
+    type: 'message',
+    title: 'New enquiry',
+    body: 'A resident sent you a message about booking a session.',
+    link: '/psychologist/chats',
+    read: false,
+  }]);
+
+  res.status(201).json(message);
+});
+
+// GET /psychologists/me/inquiries — inbox list: one row per resident who has
+// messaged this psychologist, with their most recent message for the preview.
+app.get('/psychologists/me/inquiries', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data: messages, error } = await supabase
+    .from('Inquiry_Message')
+    .select('resident_id, body, sender_role, created_at, User:resident_id(name)')
+    .eq('psychologist_id', psychologistId)
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+
+  const byResident = new Map();
+  for (const m of messages) {
+    if (!byResident.has(m.resident_id)) {
+      byResident.set(m.resident_id, {
+        resident_id: m.resident_id,
+        resident_name: m.User?.name || `Resident #${m.resident_id}`,
+        last_message: m.body,
+        last_message_at: m.created_at,
+        // Same real, non-fabricated "unread" proxy /psychologists/me/chats uses.
+        awaiting_reply: m.sender_role === 'resident',
+      });
+    }
+  }
+  res.json([...byResident.values()]);
+});
+
+// GET/POST /psychologists/me/inquiries/:residentId/messages — psychologist side
+// of one specific thread.
+app.get('/psychologists/me/inquiries/:residentId/messages', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data, error } = await supabase
+    .from('Inquiry_Message')
+    .select('message_id, sender_role, body, created_at')
+    .eq('resident_id', req.params.residentId)
+    .eq('psychologist_id', psychologistId)
+    .order('created_at', { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post('/psychologists/me/inquiries/:residentId/messages', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { body } = req.body;
+  if (!body || !body.trim()) return res.status(400).json({ error: 'body is required' });
+
+  const psychologistId = await getOwnPsychologistId(req.user.user_id);
+  if (!psychologistId) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  const { data, error } = await supabase
+    .from('Inquiry_Message')
+    .insert([{ resident_id: req.params.residentId, psychologist_id: psychologistId, sender_role: 'psychologist', body: body.trim() }])
+    .select('message_id, sender_role, body, created_at');
+  if (error) return res.status(500).json({ error: error.message });
+
+  const message = data[0];
+  io.to(`inquiry-${req.params.residentId}-${psychologistId}`).emit('new-inquiry-message', {
+    resident_id: Number(req.params.residentId),
+    psychologist_id: psychologistId,
+    ...message,
+  });
+
+  await supabase.from('Notification').insert([{
+    user_id: req.params.residentId,
+    type: 'message',
+    title: 'New message from a psychologist',
+    body: 'You have a new reply to your enquiry.',
+    link: '/booking',
+    read: false,
+  }]);
+
+  res.status(201).json(message);
 });
 
 // GET /care-credits/reconciliation?barangay_id=3 (barangay_id optional — omit for every barangay)

@@ -1,8 +1,8 @@
-import { IconUser, IconStar, IconCircleCheck, IconMapPin, IconHeadphones, IconClock, IconCalendarEvent, IconArrowRight } from '@tabler/icons-react';
+import { IconUser, IconStar, IconCircleCheck, IconMapPin, IconHeadphones, IconClock, IconCalendarEvent, IconArrowRight, IconMessageCircle2 } from '@tabler/icons-react';
 
 const MAX_VISIBLE_TAGS = 3;
 
-function PsychologistCard({ psychologist, onBook }) {
+function PsychologistCard({ psychologist, onBook, onMessage }) {
   const name = psychologist.User?.name || `Psychologist #${psychologist.psychologist_id}`;
   const specialties = psychologist.specialties || [];
   const visibleTags = specialties.slice(0, MAX_VISIBLE_TAGS);
@@ -100,13 +100,23 @@ function PsychologistCard({ psychologist, onBook }) {
           <p className="text-xs text-brand-ink/60 mt-3 text-left line-clamp-3">{psychologist.bio}</p>
         )}
 
-        <button
-          onClick={() => onBook(psychologist)}
-          className="w-full flex items-center justify-center gap-1.5 text-sm font-medium py-2.5 rounded-full text-white mt-4 transition-opacity hover:opacity-90"
-          style={{ backgroundColor: '#2b4d3f' }}
-        >
-          <IconCalendarEvent size={15} /> Book an appointment <IconArrowRight size={15} />
-        </button>
+        <div className="flex items-center gap-2 mt-4">
+          <button
+            onClick={() => onMessage(psychologist)}
+            title="Message this psychologist"
+            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-full border transition-colors hover:bg-brand-ink/5"
+            style={{ borderColor: 'rgba(28,36,32,0.15)', color: '#2b4d3f' }}
+          >
+            <IconMessageCircle2 size={17} />
+          </button>
+          <button
+            onClick={() => onBook(psychologist)}
+            className="flex-1 flex items-center justify-center gap-1.5 text-sm font-medium py-2.5 rounded-full text-white transition-opacity hover:opacity-90"
+            style={{ backgroundColor: '#2b4d3f' }}
+          >
+            <IconCalendarEvent size={15} /> Book an appointment <IconArrowRight size={15} />
+          </button>
+        </div>
       </div>
     </div>
   );

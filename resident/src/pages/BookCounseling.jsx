@@ -5,6 +5,7 @@ import Layout from '../components/Layout';
 import PsychologistCard from '../components/PsychologistCard';
 import BookingCalendar from '../components/BookingCalendar';
 import ConfirmDialog from '../components/ConfirmDialog';
+import InquiryWidget from '../components/InquiryWidget';
 import { API_URL, authHeader } from '../config';
 
 const CATEGORIES = [
@@ -32,6 +33,7 @@ function BookCounseling() {
   const [rescheduleValue, setRescheduleValue] = useState('');
   const [careCredits, setCareCredits] = useState(null);
   const [useCredit, setUseCredit] = useState(true);
+  const [activeInquiry, setActiveInquiry] = useState(null);
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
@@ -246,7 +248,7 @@ function BookCounseling() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredPsychologists.map((p) => (
-              <PsychologistCard key={p.psychologist_id} psychologist={p} onBook={openBookingModal} />
+              <PsychologistCard key={p.psychologist_id} psychologist={p} onBook={openBookingModal} onMessage={setActiveInquiry} />
             ))}
           </div>
         )}
@@ -406,6 +408,14 @@ function BookCounseling() {
       </div>
 
       <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
+
+      {activeInquiry && (
+        <InquiryWidget
+          psychologist={activeInquiry}
+          residentId={user.user_id}
+          onClose={() => setActiveInquiry(null)}
+        />
+      )}
     </Layout>
   );
 }

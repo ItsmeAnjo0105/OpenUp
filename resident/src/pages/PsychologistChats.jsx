@@ -9,10 +9,12 @@ import {
   IconPhone,
   IconMessage,
   IconUserCircle,
+  IconMailQuestion,
 } from '@tabler/icons-react';
 import PsychologistLayout from '../components/PsychologistLayout';
 import PsychologistTopBar from '../components/PsychologistTopBar';
 import ChatPanel from '../components/ChatPanel';
+import InquiryChatPanel from '../components/InquiryChatPanel';
 import CounselingSession from '../CounselingSession';
 import { API_URL, authHeader, getStoredUser } from '../config';
 import { playHover, playClick } from '../utils/sound';
@@ -44,6 +46,7 @@ const FILTER_OPTIONS = [
 ];
 
 function PsychologistChats() {
+  const [view, setView] = useState('clients'); // 'clients' | 'inquiries'
   const [chats, setChats] = useState([]);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
@@ -51,6 +54,11 @@ function PsychologistChats() {
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [activeBookingId, setActiveBookingId] = useState(null);
   const [inCall, setInCall] = useState(false);
+
+  const [inquiries, setInquiries] = useState([]);
+  const [inquiryError, setInquiryError] = useState('');
+  const [activeInquiryResidentId, setActiveInquiryResidentId] = useState(null);
+
   const user = getStoredUser();
 
   const loadChats = () => {
@@ -63,7 +71,17 @@ function PsychologistChats() {
       .catch(() => setError('Could not load your chats.'));
   };
 
-  useEffect(() => { loadChats(); }, []);
+  const loadInquiries = () => {
+    fetch(`${API_URL}/psychologists/me/inquiries`, { headers: authHeader() })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (ok && Array.isArray(data)) setInquiries(data);
+        else setInquiryError(data?.error || 'Could not load your enquiries.');
+      })
+      .catch(() => setInquiryError('Could not load your enquiries.'));
+  };
+
+  useEffect(() => { loadChats(); loadInquiries(); }, []);
 
   const visibleChats = useMemo(() => chats
     .filter((c) => {
@@ -77,7 +95,18 @@ function PsychologistChats() {
       return true;
     }), [chats, filter, search]);
 
+  const visibleInquiries = useMemo(() => inquiries.filter((i) => {
+    if (filter === 'awaiting' && !i.awaiting_reply) return false;
+    if (filter === 'replied' && i.awaiting_reply) return false;
+    if (search) {
+      const needle = search.toLowerCase();
+      if (!`${i.resident_name} ${i.last_message || ''}`.toLowerCase().includes(needle)) return false;
+    }
+    return true;
+  }), [inquiries, filter, search]);
+
   const activeChat = chats.find((c) => c.booking_id === activeBookingId);
+  const activeInquiry = inquiries.find((i) => i.resident_id === activeInquiryResidentId);
 
   const openChat = (bookingId, startCall = false) => {
     playClick();
@@ -91,6 +120,43 @@ function PsychologistChats() {
     setInCall(false);
     loadChats();
   };
+
+  const openInquiry = (residentId) => {
+    playClick();
+    setActiveInquiryResidentId(residentId);
+  };
+
+  const goBackFromInquiry = () => {
+    playClick();
+    setActiveInquiryResidentId(null);
+    loadInquiries();
+  };
+
+  if (activeInquiry) {
+    const color = colorForId(activeInquiry.resident_id);
+    return (
+      <PsychologistLayout>
+        <button onClick={goBackFromInquiry} onMouseEnter={playHover} className="interactive-nav inline-flex items-center gap-1.5 text-sm text-brand-ink/60 mb-4">
+          <IconArrowLeft size={15} /> Back to Chats
+        </button>
+
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <span className={`w-11 h-11 rounded-full ${color.bg} ${color.text} flex items-center justify-center shrink-0`}>
+              <IconUserCircle size={22} />
+            </span>
+            <div>
+              <p className="text-sm font-semibold">{activeInquiry.resident_name}</p>
+              <p className="text-xs text-brand-ink/50">Pre-booking enquiry -- not a confirmed client yet</p>
+            </div>
+          </div>
+          <PsychologistTopBar />
+        </div>
+
+        <InquiryChatPanel residentId={activeInquiry.resident_id} />
+      </PsychologistLayout>
+    );
+  }
 
   if (activeChat) {
     const color = colorForId(activeChat.resident_id);
@@ -142,19 +208,41 @@ function PsychologistChats() {
             <IconMessageCircle2 size={22} className="text-brand-primary" /> Anonymous Chats
           </h1>
           <p className="text-brand-ink/60 text-sm">
-            Message clients from your confirmed sessions. Their identity stays masked.
+            {view === 'clients'
+              ? 'Message clients from your confirmed sessions. Their identity stays masked.'
+              : 'Residents asking about booking a session with you, before they book.'}
           </p>
         </div>
         <PsychologistTopBar />
       </div>
 
-      <div className="flex items-center gap-3 mt-6 mb-5">
+      <div className="flex items-center gap-2 mt-5">
+        <button
+          onClick={() => { playClick(); setView('clients'); }}
+          onMouseEnter={playHover}
+          className={`interactive text-xs font-medium px-3.5 py-2 rounded-full ${view === 'clients' ? 'bg-brand-primary text-white' : 'border border-brand-ink/15 text-brand-ink/70'}`}
+        >
+          Confirmed Clients
+        </button>
+        <button
+          onClick={() => { playClick(); setView('inquiries'); }}
+          onMouseEnter={playHover}
+          className={`interactive flex items-center gap-1.5 text-xs font-medium px-3.5 py-2 rounded-full ${view === 'inquiries' ? 'bg-brand-primary text-white' : 'border border-brand-ink/15 text-brand-ink/70'}`}
+        >
+          <IconMailQuestion size={13} /> Enquiries
+          {inquiries.some((i) => i.awaiting_reply) && (
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+          )}
+        </button>
+      </div>
+
+      <div className="flex items-center gap-3 mt-4 mb-5">
         <div className="relative flex-1">
           <IconSearch size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-ink/40" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search chats..."
+            placeholder={view === 'clients' ? 'Search chats...' : 'Search enquiries...'}
             className="w-full border border-brand-ink/15 rounded-full pl-10 pr-10 py-2.5 text-sm bg-brand-surface"
           />
           {search && (
@@ -193,6 +281,8 @@ function PsychologistChats() {
       </div>
 
       <div className="bg-brand-surface rounded-2xl shadow-sm p-3">
+      {view === 'clients' ? (
+        <>
         {error && <p className="text-sm text-red-600 p-3">{error}</p>}
 
         {chats.length === 0 && !error ? (
@@ -258,6 +348,55 @@ function PsychologistChats() {
             })}
           </div>
         )}
+        </>
+      ) : (
+        <>
+        {inquiryError && <p className="text-sm text-red-600 p-3">{inquiryError}</p>}
+
+        {inquiries.length === 0 && !inquiryError ? (
+          <p className="text-sm text-brand-ink/50 p-3">No enquiries yet.</p>
+        ) : visibleInquiries.length === 0 ? (
+          <p className="text-sm text-brand-ink/50 p-3">No enquiries match this search or filter.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {visibleInquiries.map((inq) => {
+              const color = colorForId(inq.resident_id);
+              return (
+                <button
+                  key={inq.resident_id}
+                  onClick={() => openInquiry(inq.resident_id)}
+                  onMouseEnter={playHover}
+                  className={`interactive-card flex items-center gap-4 rounded-xl p-4 text-left border-l-4 ${
+                    inq.awaiting_reply ? 'border-brand-primary bg-brand-primary/5' : 'border-transparent hover:bg-brand-ink/5'
+                  }`}
+                >
+                  <span className={`w-11 h-11 rounded-full ${color.bg} ${color.text} flex items-center justify-center shrink-0`}>
+                    <IconUserCircle size={22} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold">{inq.resident_name}</p>
+                      {inq.awaiting_reply && (
+                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-brand-primary/15 text-brand-primary">
+                          New message
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-brand-ink/50 truncate mt-0.5">
+                      {inq.last_message || 'No messages yet.'}
+                    </p>
+                  </div>
+                  <p className="text-xs text-brand-ink/40 whitespace-nowrap hidden md:block">
+                    {new Date(inq.last_message_at).toLocaleString('en-PH', { dateStyle: 'short', timeStyle: 'short' })}
+                  </p>
+                  <IconChevronRight size={16} className="text-brand-ink/30 shrink-0" />
+                </button>
+              );
+            })}
+          </div>
+        )}
+        </>
+      )}
       </div>
     </PsychologistLayout>
   );

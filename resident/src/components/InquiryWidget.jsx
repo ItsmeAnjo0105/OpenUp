@@ -65,7 +65,7 @@ function InquiryWidget({ psychologist, residentId, onClose }) {
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] bg-brand-surface rounded-2xl shadow-xl overflow-hidden flex flex-col" style={{ border: '1px solid rgba(28,36,32,0.1)', maxHeight: minimized ? 'auto' : '28rem' }}>
+    <div className="fixed bottom-4 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] bg-brand-surface rounded-2xl shadow-xl overflow-hidden flex flex-col" style={{ border: '1px solid rgba(28,36,32,0.1)', height: minimized ? 'auto' : '34rem' }}>
       <div className="flex items-center gap-2.5 px-4 py-3 shrink-0" style={{ backgroundColor: '#2b4d3f' }}>
         {psychologist.profile_photo_url ? (
           <img src={psychologist.profile_photo_url} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />

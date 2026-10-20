@@ -47,6 +47,7 @@ function Dashboard() {
 
   const [payingId, setPayingId] = useState(null);
   const [payError, setPayError] = useState('');
+  const [simulatePaymentId, setSimulatePaymentId] = useState(null);
   const [bookingActionError, setBookingActionError] = useState('');
   const [reschedulingId, setReschedulingId] = useState(null);
   const [rescheduleValue, setRescheduleValue] = useState('');
@@ -107,6 +108,7 @@ function Dashboard() {
   const handlePay = async (paymentId) => {
     setPayError('');
     setPayingId(paymentId);
+    setSimulatePaymentId(null);
     try {
       const res = await fetch(`${API_URL}/payments/${paymentId}/checkout`, {
         method: 'POST',
@@ -114,11 +116,39 @@ function Dashboard() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setPayError(data.error || 'Could not start checkout.');
+        setPayError(`${data.error || 'Could not start checkout.'} You can simulate payment below for testing.`);
+        setSimulatePaymentId(paymentId);
         setPayingId(null);
         return;
       }
       window.location.href = data.checkout_url;
+    } catch {
+      setPayError('Could not reach the server. You can simulate payment below for testing.');
+      setSimulatePaymentId(paymentId);
+      setPayingId(null);
+    }
+  };
+
+  // Dev-only stand-in for real checkout -- see POST /payments/:id/simulate.
+  // Locks itself out server-side the moment real payment processing is
+  // configured, so this button only ever does anything in a test environment.
+  const handleSimulatePayment = async (paymentId) => {
+    setPayError('');
+    setPayingId(paymentId);
+    try {
+      const res = await fetch(`${API_URL}/payments/${paymentId}/simulate`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('openup_token')}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPayError(data.error || 'Could not simulate payment.');
+        setPayingId(null);
+        return;
+      }
+      setSimulatePaymentId(null);
+      setPayingId(null);
+      loadBookings();
     } catch {
       setPayError('Could not reach the server.');
       setPayingId(null);
@@ -278,6 +308,15 @@ function Dashboard() {
                             {payingId === payment.payment_id
                               ? 'Redirecting...'
                               : `Pay ₱${Number(payment.amount).toLocaleString()}`}
+                          </button>
+                        )}
+                        {payment && payment.status === 'pending' && simulatePaymentId === payment.payment_id && (
+                          <button
+                            onClick={() => handleSimulatePayment(payment.payment_id)}
+                            disabled={payingId === payment.payment_id}
+                            className="text-xs font-medium px-3 py-1.5 rounded-full border border-brand-primary text-brand-primary disabled:opacity-60"
+                          >
+                            {payingId === payment.payment_id ? 'Simulating...' : 'Simulate payment (test)'}
                           </button>
                         )}
                         {payment && payment.status === 'paid' && (

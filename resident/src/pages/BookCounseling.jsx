@@ -34,6 +34,7 @@ function BookCounseling() {
   const [careCredits, setCareCredits] = useState(null);
   const [useCredit, setUseCredit] = useState(true);
   const [activeInquiry, setActiveInquiry] = useState(null);
+  const [fallbackPaymentId, setFallbackPaymentId] = useState(null);
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
@@ -128,12 +129,14 @@ function BookCounseling() {
     setSelected(psychologist);
     setSchedule('');
     setStatus('');
+    setFallbackPaymentId(null);
     setUseCredit((careCredits?.available_count || 0) > 0);
   };
 
   const closeModal = () => {
     setSelected(null);
     setStatus('');
+    setFallbackPaymentId(null);
   };
 
   const handleSubmit = (e) => {
@@ -195,19 +198,48 @@ function BookCounseling() {
           });
           const checkoutData = await checkoutRes.json();
           if (!checkoutRes.ok) {
-            setStatus(`Session confirmed, but could not start payment: ${checkoutData.error || 'unknown error'}. You can pay from your Dashboard.`);
+            setStatus(`Session confirmed, but could not start payment: ${checkoutData.error || 'unknown error'}. You can pay from your Dashboard, or simulate payment below for testing.`);
+            setFallbackPaymentId(data.payment.payment_id);
             setLoading(false);
             return;
           }
           window.location.href = checkoutData.checkout_url;
         } catch {
-          setStatus('Session confirmed, but could not reach the payment service. You can pay from your Dashboard.');
+          setStatus('Session confirmed, but could not reach the payment service. You can pay from your Dashboard, or simulate payment below for testing.');
+          setFallbackPaymentId(data.payment.payment_id);
           setLoading(false);
         }
         return;
       }
 
       setStatus('Session confirmed!');
+      setLoading(false);
+      setTimeout(() => navigate('/dashboard'), 1800);
+    } catch {
+      setStatus('Could not reach the server.');
+      setLoading(false);
+    }
+  };
+
+  // Dev-only stand-in for real checkout -- see POST /payments/:id/simulate.
+  // Locks itself out server-side the moment real payment processing is
+  // configured, so this button only ever does anything in a test environment.
+  const simulatePayment = async () => {
+    if (!fallbackPaymentId) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/payments/${fallbackPaymentId}/simulate`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('openup_token')}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatus(data.error || 'Could not simulate payment.');
+        setLoading(false);
+        return;
+      }
+      setStatus('Payment simulated (test only). Session fully confirmed!');
+      setFallbackPaymentId(null);
       setLoading(false);
       setTimeout(() => navigate('/dashboard'), 1800);
     } catch {
@@ -329,19 +361,30 @@ function BookCounseling() {
                 ) : (
                   <p className="text-xs text-brand-ink/40 flex items-center gap-1.5">
                     <IconWallet size={14} className="shrink-0" />
-                    No Care Credits available — this session will need to be paid for once your psychologist accepts.
+                    No Care Credits available — you'll be taken to payment right after confirming.
                   </p>
                 )}
 
                 {status && <p className="text-sm text-brand-primary font-medium">{status}</p>}
 
-                <button
-                  type="submit"
-                  disabled={loading || !schedule}
-                  className="w-full bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors disabled:opacity-60"
-                >
-                  {loading ? 'Booking...' : schedule ? 'Confirm booking' : 'Select a time above'}
-                </button>
+                {fallbackPaymentId ? (
+                  <button
+                    type="button"
+                    onClick={simulatePayment}
+                    disabled={loading}
+                    className="w-full border border-brand-primary text-brand-primary py-2.5 rounded-full font-medium hover:bg-brand-primary/5 transition-colors disabled:opacity-60"
+                  >
+                    {loading ? 'Simulating...' : 'Simulate payment (test only)'}
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={loading || !schedule}
+                    className="w-full bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors disabled:opacity-60"
+                  >
+                    {loading ? 'Booking...' : schedule ? 'Confirm booking' : 'Select a time above'}
+                  </button>
+                )}
               </form>
             </div>
           </div>

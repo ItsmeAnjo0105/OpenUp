@@ -273,6 +273,30 @@ app.post('/payments/:id/checkout', requireAuth, requireRole('resident'), async (
   }
 });
 
+// POST /payments/:id/simulate — dev-only stand-in for real checkout, for
+// testing the booking flow end-to-end when PAYMONGO_SECRET_KEY isn't
+// configured. Locks itself out the moment real payment processing IS
+// configured, so this can never be used to dodge an actual charge in an
+// environment where payments are real.
+app.post('/payments/:id/simulate', requireAuth, requireRole('resident'), async (req, res) => {
+  if (process.env.PAYMONGO_SECRET_KEY) {
+    return res.status(403).json({ error: 'Simulated payment is not available when real payment processing is configured.' });
+  }
+
+  const payment = await getPaymentIfOwned(req.params.id, req.user);
+  if (!payment) return res.status(404).json({ error: 'Payment not found' });
+  if (payment.status !== 'pending') return res.status(409).json({ error: 'This payment is not pending' });
+
+  const { data, error } = await supabase
+    .from('Payment')
+    .update({ status: 'paid' })
+    .eq('payment_id', payment.payment_id)
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data[0]);
+});
+
 // GET /payments/:id/sync — call after the resident returns from PayMongo's checkout
 // page. Looks up the real status directly from PayMongo (source of truth) rather than
 // trusting the success/cancel redirect alone, which a user could reach without paying.

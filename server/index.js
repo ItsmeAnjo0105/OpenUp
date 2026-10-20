@@ -2476,8 +2476,11 @@ app.post('/admin/bookings/:id/reassign', requireAuth, requireRole('admin'), asyn
 // transaction (see db/create_booking_transaction.sql). If any step fails — including
 // the unique-slot conflict — Postgres rolls back all of it, so there's never a
 // booking left without a payment, or a credit stranded as 'used' with nothing to show for it.
-// Creates a *request* (status 'pending', credit only reserved) — it isn't confirmed
-// until the psychologist accepts it. See POST /bookings/:id/accept and /decline below.
+// Auto-confirms immediately (same as the crisis-match path) rather than creating a
+// pending request a psychologist has to accept first -- the calendar this books
+// against (GET /psychologists/:id/availability) already only ever offers genuinely
+// free slots, so there's nothing left to approve. A Payment is always created here:
+// 'paid' if a Care Credit covered it, 'pending' (needs /payments/:id/checkout) if not.
 app.post('/bookings', async (req, res) => {
   const { resident_id, psychologist_id, schedule, use_credit } = req.body;
 
@@ -2489,7 +2492,7 @@ app.post('/bookings', async (req, res) => {
     p_resident_id: resident_id,
     p_psychologist_id: psychologist_id,
     p_schedule: schedule,
-    p_auto_confirm: false,
+    p_auto_confirm: true,
     p_use_credit: use_credit !== false,
   });
 
@@ -2501,6 +2504,30 @@ app.post('/bookings', async (req, res) => {
       return res.status(409).json({ error: 'This slot was just requested by someone else. Please pick another time.' });
     }
     return res.status(500).json({ error: error.message });
+  }
+
+  // Since this is now auto-confirmed rather than a request they'd see in a
+  // pending queue, the psychologist needs an explicit heads-up that a session
+  // just landed on their calendar. Best-effort: the booking already succeeded
+  // either way, so a notification failure shouldn't fail the response.
+  try {
+    const { data: psychologist } = await supabase
+      .from('Psychologist')
+      .select('user_id')
+      .eq('psychologist_id', psychologist_id)
+      .single();
+    if (psychologist) {
+      await supabase.from('Notification').insert([{
+        user_id: psychologist.user_id,
+        type: 'system',
+        title: 'New session booked',
+        body: 'A resident just booked a confirmed session with you.',
+        link: '/psychologist/schedule',
+        read: false,
+      }]);
+    }
+  } catch {
+    // best-effort
   }
 
   res.status(201).json(data);

@@ -142,8 +142,8 @@ function BookCounseling() {
     const willUseCredit = useCredit && (careCredits?.available_count || 0) > 0;
     setConfirmDialog({
       title: 'Are you sure you want to continue?',
-      message: `You're requesting a session with ${selected.User?.name || 'this psychologist'} on ${dateLabel}. They'll need to accept it first.${
-        willUseCredit ? ' A Care Credit will be reserved to cover it.' : ''
+      message: `You're booking a session with ${selected.User?.name || 'this psychologist'} on ${dateLabel}. This is confirmed right away.${
+        willUseCredit ? ' A Care Credit will cover the cost.' : " You'll be taken to payment next."
       }`,
       confirmLabel: 'Confirm booking',
       destructive: false,
@@ -174,13 +174,41 @@ function BookCounseling() {
         return;
       }
 
-      setStatus(
-        data.care_credit_reserved
-          ? "Request sent! Your Care Credit is reserved and will be used once the psychologist accepts."
-          : "Request sent! You'll be notified once the psychologist responds."
-      );
-      setLoading(false);
       loadCareCredits();
+
+      // Covered by a Care Credit -- nothing to pay, just confirm and leave.
+      if (data.payment?.status === 'paid') {
+        setStatus('Session confirmed! Your Care Credit covered the cost.');
+        setLoading(false);
+        setTimeout(() => navigate('/dashboard'), 1800);
+        return;
+      }
+
+      // Not covered -- confirmed, but payment is still owed. Send them
+      // straight to PayMongo checkout, same path Dashboard's "Pay now" uses.
+      if (data.payment?.status === 'pending') {
+        setStatus('Session confirmed! Taking you to payment...');
+        try {
+          const checkoutRes = await fetch(`${API_URL}/payments/${data.payment.payment_id}/checkout`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${localStorage.getItem('openup_token')}` },
+          });
+          const checkoutData = await checkoutRes.json();
+          if (!checkoutRes.ok) {
+            setStatus(`Session confirmed, but could not start payment: ${checkoutData.error || 'unknown error'}. You can pay from your Dashboard.`);
+            setLoading(false);
+            return;
+          }
+          window.location.href = checkoutData.checkout_url;
+        } catch {
+          setStatus('Session confirmed, but could not reach the payment service. You can pay from your Dashboard.');
+          setLoading(false);
+        }
+        return;
+      }
+
+      setStatus('Session confirmed!');
+      setLoading(false);
       setTimeout(() => navigate('/dashboard'), 1800);
     } catch {
       setStatus('Could not reach the server.');

@@ -681,7 +681,12 @@ app.get('/psychologists/me', requireAuth, requireRole('psychologist'), async (re
     .single();
 
   if (error || !data) return res.status(404).json({ error: 'No psychologist profile found for this account' });
-  res.json(data);
+  res.json({
+    ...data,
+    profile_photo_url: data.profile_photo_url
+      ? supabase.storage.from('psychologist-photos').getPublicUrl(data.profile_photo_url).data.publicUrl
+      : null,
+  });
 });
 
 // PATCH /psychologists/me — self-editable profile fields only. license_no, credentials,
@@ -717,6 +722,82 @@ app.patch('/psychologists/me', requireAuth, requireRole('psychologist'), async (
   if (error) return res.status(500).json({ error: error.message });
   if (!data || data.length === 0) return res.status(404).json({ error: 'No psychologist profile found for this account' });
   res.json(data[0]);
+});
+
+const uploadPhoto = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
+// POST /psychologists/me/photo — multipart: photo. Replaces any existing photo
+// (old file removed from storage, best-effort -- a cleanup failure shouldn't
+// block the new photo from being saved). Stored in the same public
+// psychologist-photos bucket the directory/booking pages already resolve
+// profile_photo_url against.
+app.post('/psychologists/me/photo', requireAuth, requireRole('psychologist'), uploadPhoto.single('photo'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'A photo file is required' });
+  if (!req.file.mimetype.startsWith('image/')) {
+    return res.status(400).json({ error: 'File must be an image' });
+  }
+
+  const { data: existing } = await supabase
+    .from('Psychologist')
+    .select('profile_photo_url')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  const ext = (req.file.originalname.match(/\.[a-zA-Z0-9]+$/)?.[0] || '.jpg').toLowerCase();
+  const filePath = `${req.user.user_id}/${Date.now()}${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('psychologist-photos')
+    .upload(filePath, req.file.buffer, { contentType: req.file.mimetype });
+  if (uploadError) return res.status(500).json({ error: uploadError.message });
+
+  const { data, error } = await supabase
+    .from('Psychologist')
+    .update({ profile_photo_url: filePath })
+    .eq('user_id', req.user.user_id)
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data || data.length === 0) return res.status(404).json({ error: 'No psychologist profile found for this account' });
+
+  if (existing?.profile_photo_url) {
+    try {
+      await supabase.storage.from('psychologist-photos').remove([existing.profile_photo_url]);
+    } catch {
+      // best-effort -- the new photo is already saved either way
+    }
+  }
+
+  res.json({
+    ...data[0],
+    profile_photo_url: supabase.storage.from('psychologist-photos').getPublicUrl(filePath).data.publicUrl,
+  });
+});
+
+// DELETE /psychologists/me/photo — removes the photo and reverts to the
+// initials avatar used everywhere a psychologist is shown.
+app.delete('/psychologists/me/photo', requireAuth, requireRole('psychologist'), async (req, res) => {
+  const { data: existing } = await supabase
+    .from('Psychologist')
+    .select('profile_photo_url')
+    .eq('user_id', req.user.user_id)
+    .single();
+
+  const { error } = await supabase
+    .from('Psychologist')
+    .update({ profile_photo_url: null })
+    .eq('user_id', req.user.user_id);
+  if (error) return res.status(500).json({ error: error.message });
+
+  if (existing?.profile_photo_url) {
+    try {
+      await supabase.storage.from('psychologist-photos').remove([existing.profile_photo_url]);
+    } catch {
+      // best-effort
+    }
+  }
+
+  res.json({ removed: true });
 });
 
 // Weekly recurring availability windows. Distinct from Psychologist.availability

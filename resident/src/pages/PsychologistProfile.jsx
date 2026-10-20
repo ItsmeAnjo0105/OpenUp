@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { IconCamera } from '@tabler/icons-react';
 import PsychologistLayout from '../components/PsychologistLayout';
 import { API_URL, authHeader, getStoredUser } from '../config';
+
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 function initials(name) {
   return (name || '?')
@@ -17,6 +20,9 @@ function PsychologistProfile() {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+  const fileInputRef = useRef(null);
   const user = getStoredUser();
 
   const load = () => {
@@ -74,6 +80,63 @@ function PsychologistProfile() {
     }
   };
 
+  const handlePhotoChange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setPhotoError('');
+    if (!file.type.startsWith('image/')) {
+      setPhotoError('Please choose an image file.');
+      return;
+    }
+    if (file.size > MAX_PHOTO_BYTES) {
+      setPhotoError('Image must be 5MB or smaller.');
+      return;
+    }
+
+    setPhotoUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('photo', file);
+      const res = await fetch(`${API_URL}/psychologists/me/photo`, {
+        method: 'POST',
+        headers: authHeader(),
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPhotoError(data.error || 'Could not upload photo.');
+        setPhotoUploading(false);
+        return;
+      }
+      setProfile(data);
+      setPhotoUploading(false);
+    } catch {
+      setPhotoError('Could not reach the server.');
+      setPhotoUploading(false);
+    }
+  };
+
+  const handleRemovePhoto = async () => {
+    setPhotoError('');
+    setPhotoUploading(true);
+    try {
+      const res = await fetch(`${API_URL}/psychologists/me/photo`, { method: 'DELETE', headers: authHeader() });
+      const data = await res.json();
+      if (!res.ok) {
+        setPhotoError(data.error || 'Could not remove photo.');
+        setPhotoUploading(false);
+        return;
+      }
+      setProfile((p) => ({ ...p, profile_photo_url: null }));
+      setPhotoUploading(false);
+    } catch {
+      setPhotoError('Could not reach the server.');
+      setPhotoUploading(false);
+    }
+  };
+
   return (
     <PsychologistLayout>
       <div className="flex items-center justify-between mb-1">
@@ -93,9 +156,31 @@ function PsychologistProfile() {
 
       {profile && (
         <div className="bg-brand-surface rounded-2xl shadow-sm p-6 max-w-2xl">
-          <div className="flex items-center gap-4 mb-6">
-            <div className="w-14 h-14 shrink-0 rounded-full bg-brand-primary text-white flex items-center justify-center text-lg font-semibold">
-              {initials(user?.name)}
+          <div className="flex items-center gap-4 mb-2">
+            <div className="relative w-14 h-14 shrink-0">
+              {profile.profile_photo_url ? (
+                <img src={profile.profile_photo_url} alt="" className="w-14 h-14 rounded-full object-cover" />
+              ) : (
+                <div className="w-14 h-14 rounded-full bg-brand-primary text-white flex items-center justify-center text-lg font-semibold">
+                  {initials(user?.name)}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={photoUploading}
+                title="Upload photo"
+                className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-brand-primary text-white flex items-center justify-center shadow-sm disabled:opacity-60"
+              >
+                <IconCamera size={13} />
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handlePhotoChange}
+                className="hidden"
+              />
             </div>
             <div>
               <p className="font-display text-lg font-semibold">{user?.name}</p>
@@ -110,6 +195,16 @@ function PsychologistProfile() {
                 </span>
               )}
             </div>
+          </div>
+
+          <div className="mb-6 flex items-center gap-3">
+            {photoUploading && <p className="text-xs text-brand-ink/50">Uploading…</p>}
+            {photoError && <p className="text-xs text-red-600">{photoError}</p>}
+            {profile.profile_photo_url && !photoUploading && (
+              <button type="button" onClick={handleRemovePhoto} className="text-xs text-brand-ink/50 hover:text-red-600">
+                Remove photo
+              </button>
+            )}
           </div>
 
           {editing ? (

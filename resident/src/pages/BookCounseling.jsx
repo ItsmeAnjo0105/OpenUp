@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { IconArrowLeft, IconSearch, IconCalendarEvent, IconChevronRight, IconUsersGroup, IconMoodSad, IconMoodEmpty, IconCloudRain, IconHeartHandshake, IconUsers, IconWallet } from '@tabler/icons-react';
 import Layout from '../components/Layout';
 import PsychologistCard from '../components/PsychologistCard';
@@ -34,7 +34,6 @@ function BookCounseling() {
   const [careCredits, setCareCredits] = useState(null);
   const [useCredit, setUseCredit] = useState(true);
   const [activeInquiry, setActiveInquiry] = useState(null);
-  const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   const loadCareCredits = () => {
@@ -179,7 +178,7 @@ function BookCounseling() {
       if (data.payment?.status === 'paid') {
         setStatus('Session confirmed! Your Care Credit covered the cost.');
         setLoading(false);
-        setTimeout(() => navigate('/dashboard'), 1800);
+        setTimeout(() => closeModal(), 1800);
         return;
       }
 
@@ -199,7 +198,7 @@ function BookCounseling() {
           }
           setStatus('Payment received! Session confirmed.');
           setLoading(false);
-          setTimeout(() => navigate('/dashboard'), 1800);
+          setTimeout(() => closeModal(), 1800);
         } catch {
           setStatus('Session confirmed, but could not reach the payment service. You can pay from your Dashboard.');
           setLoading(false);
@@ -209,7 +208,7 @@ function BookCounseling() {
 
       setStatus('Session confirmed!');
       setLoading(false);
-      setTimeout(() => navigate('/dashboard'), 1800);
+      setTimeout(() => closeModal(), 1800);
     } catch {
       setStatus('Could not reach the server.');
       setLoading(false);

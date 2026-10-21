@@ -5,6 +5,7 @@ import Layout from '../components/Layout';
 import ConfirmDialog from '../components/ConfirmDialog';
 import EmotionPicker from '../components/EmotionPicker';
 import MoodGate from '../components/MoodGate';
+import HotlinesCard from '../components/HotlinesCard';
 import { API_URL } from '../config';
 
 function Dashboard() {
@@ -14,6 +15,7 @@ function Dashboard() {
   const [moodLoaded, setMoodLoaded] = useState(false);
   const [moodGateDismissed, setMoodGateDismissed] = useState(false);
   const [savingMood, setSavingMood] = useState(false);
+  const [emergencyContacts, setEmergencyContacts] = useState([]);
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   const loadMoodEntries = () => {
@@ -35,6 +37,13 @@ function Dashboard() {
       .catch(() => {});
   };
 
+  const loadEmergencyContacts = () => {
+    fetch(`${API_URL}/emergency-contacts`)
+      .then((res) => res.json())
+      .then((data) => setEmergencyContacts(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  };
+
   useEffect(() => {
     if (!user) {
       navigate('/', { state: { authMode: 'login' } });
@@ -43,6 +52,7 @@ function Dashboard() {
 
     loadBookings();
     loadMoodEntries();
+    loadEmergencyContacts();
   }, [user, navigate]);
 
   const [payingId, setPayingId] = useState(null);
@@ -168,7 +178,10 @@ function Dashboard() {
 
   return (
     <Layout>
-      <div className="max-w-2xl mx-auto space-y-6">
+      <div className="max-w-5xl mx-auto grid lg:grid-cols-[280px_1fr] gap-6 items-start">
+        <HotlinesCard emergencyContacts={emergencyContacts} />
+
+        <div className="max-w-2xl space-y-6">
         <div>
           <h1 className="font-display text-2xl font-semibold">Hi, {firstName} 🌿</h1>
           <p className="text-brand-ink/60 text-sm">How are you feeling today?</p>
@@ -350,6 +363,7 @@ function Dashboard() {
               <Bar dataKey="mood" fill="#2F5D50" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
+        </div>
         </div>
       </div>
 

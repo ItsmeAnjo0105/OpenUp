@@ -16,6 +16,7 @@ function Dashboard() {
   const [moodGateDismissed, setMoodGateDismissed] = useState(false);
   const [savingMood, setSavingMood] = useState(false);
   const [emergencyContacts, setEmergencyContacts] = useState([]);
+  const [barangayName, setBarangayName] = useState('');
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   const loadMoodEntries = () => {
@@ -44,6 +45,16 @@ function Dashboard() {
       .catch(() => {});
   };
 
+  const loadBarangayName = () => {
+    fetch(`${API_URL}/barangays`)
+      .then((res) => res.json())
+      .then((data) => {
+        const match = Array.isArray(data) && data.find((b) => b.barangay_id === user.barangay_id);
+        if (match) setBarangayName(match.name);
+      })
+      .catch(() => {});
+  };
+
   useEffect(() => {
     if (!user) {
       navigate('/', { state: { authMode: 'login' } });
@@ -53,6 +64,7 @@ function Dashboard() {
     loadBookings();
     loadMoodEntries();
     loadEmergencyContacts();
+    loadBarangayName();
   }, [user, navigate]);
 
   const [payingId, setPayingId] = useState(null);
@@ -178,9 +190,7 @@ function Dashboard() {
 
   return (
     <Layout>
-      <div className="max-w-5xl mx-auto grid lg:grid-cols-[280px_1fr] gap-6 items-start">
-        <HotlinesCard emergencyContacts={emergencyContacts} />
-
+      <div className="max-w-5xl mx-auto grid lg:grid-cols-[1fr_280px] gap-6 items-start">
         <div className="max-w-2xl space-y-6">
         <div>
           <h1 className="font-display text-2xl font-semibold">Hi, {firstName} 🌿</h1>
@@ -365,6 +375,8 @@ function Dashboard() {
           </ResponsiveContainer>
         </div>
         </div>
+
+        <HotlinesCard barangayName={barangayName} emergencyContacts={emergencyContacts} />
       </div>
 
       <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { IconCoin } from '@tabler/icons-react';
 import LguLayout from '../components/LguLayout';
 import LguTopBar from '../components/LguTopBar';
 import { API_URL, authHeader } from '../config';
 
-const SUBSCRIPTION_LABEL = { active: 'Active', inactive: 'Inactive', past_due: 'Past due', cancelled: 'Cancelled' };
+const SUBSCRIPTION_LABEL = { active: 'Active', inactive: 'Inactive', expired: 'Expired', past_due: 'Expired', cancelled: 'Cancelled' };
 
 function LguFunding() {
   const [data, setData] = useState(null);
@@ -26,7 +27,10 @@ function LguFunding() {
           <h1 className="font-display text-2xl font-semibold flex items-center gap-2">
             <IconCoin size={22} className="text-brand-primary" /> Funding & Budget Analytics
           </h1>
-          <p className="text-brand-ink/60 text-sm">Funding and subscription changes are managed by the OpenUp admin team.</p>
+          <p className="text-brand-ink/60 text-sm">
+            Budget funding is managed by the OpenUp admin team. Manage your own subscription plan from{' '}
+            <Link to="/lgu/subscription" className="text-brand-primary font-medium">Subscription</Link>.
+          </p>
         </div>
         <LguTopBar />
       </div>

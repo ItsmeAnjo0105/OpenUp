@@ -24,6 +24,18 @@ html {
   html { scroll-behavior: auto; }
 }
 
+/* 16s box-breathing cycle: 4s inhale, 4s hold, 4s exhale, 4s hold */
+@keyframes breathing-circle {
+  0% { transform: scale(0.7); }
+  25% { transform: scale(1); }
+  50% { transform: scale(1); }
+  75% { transform: scale(0.7); }
+  100% { transform: scale(0.7); }
+}
+.breathing-circle {
+  animation: breathing-circle 16s ease-in-out infinite;
+}
+
 @keyframes mic-ring-pulse {
   0% {
     transform: scale(1);
@@ -61,6 +73,29 @@ html {
 }
 .sidebar-scroll:hover::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.3);
+}
+
+/* Same idea as .sidebar-scroll, but for light-surface scroll areas (e.g. the
+   AI Crisis Companion's chat log) -- a dark thumb instead of a light one. */
+.chat-scroll {
+  scrollbar-width: none;
+}
+.chat-scroll:hover {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(28, 36, 32, 0.18) transparent;
+}
+.chat-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.chat-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+}
+.chat-scroll:hover::-webkit-scrollbar-thumb {
+  background: rgba(28, 36, 32, 0.18);
 }
 
 /* Interaction layer: hover lift + scale + soft shadow, with a quick press-down
@@ -112,6 +147,95 @@ html {
 .interactive-nav:active {
   transform: translateX(1px) scale(0.98);
   transition-duration: 90ms;
+}
+
+/* LGU > Subscription plan cards.
+   Hover (mouse only): thin dark-sage outline, small lift + scale, green shadow.
+   Selected: a thicker solid brand-green ring, a faint sage tint and a check --
+   stays after the mouse leaves and is clearly different from hover.
+   Touch devices never get hover styles (they "stick" after a tap); they get a
+   pressed state plus the same selected state instead. */
+.plan-card {
+  border: 1px solid rgba(28, 36, 32, 0.07);
+  box-shadow: 0 1px 3px rgba(28, 36, 32, 0.06);
+  transition:
+    transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 260ms ease,
+    border-color 220ms ease,
+    background-color 220ms ease;
+  cursor: pointer;
+}
+.plan-card.is-featured {
+  border-color: rgba(47, 93, 80, 0.35);
+}
+.plan-card.is-selected {
+  border-color: var(--color-brand-primary);
+  background-color: #f5f9f6;
+  box-shadow:
+    0 0 0 2px var(--color-brand-primary),
+    0 10px 24px -14px rgba(47, 93, 80, 0.45);
+}
+.plan-card:active {
+  transform: scale(0.99);
+  transition-duration: 90ms;
+}
+.plan-badge {
+  translate: -50% 0;
+  box-shadow: 0 4px 10px -2px rgba(31, 63, 54, 0.35);
+  transition: translate 260ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 260ms ease;
+}
+.plan-subscribe {
+  background-color: var(--color-brand-primary);
+  cursor: pointer;
+  transition: background-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+.plan-subscribe:active:not(:disabled) {
+  background-color: var(--color-brand-primary-dark);
+  transform: scale(0.98);
+  transition-duration: 90ms;
+}
+.plan-subscribe:disabled {
+  cursor: not-allowed;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .plan-card:hover {
+    transform: translateY(-4px) scale(1.025);
+    border-color: #3e6b5c;
+    box-shadow: 0 16px 32px -14px rgba(47, 93, 80, 0.4), 0 4px 10px -4px rgba(47, 93, 80, 0.15);
+  }
+  .plan-card.is-selected:hover {
+    border-color: var(--color-brand-primary);
+    box-shadow:
+      0 0 0 2px var(--color-brand-primary),
+      0 16px 32px -14px rgba(47, 93, 80, 0.45);
+  }
+  .plan-card:hover .plan-badge {
+    translate: -50% -2px;
+    box-shadow: 0 7px 14px -3px rgba(31, 63, 54, 0.4);
+  }
+  .plan-subscribe:hover:not(:disabled) {
+    background-color: var(--color-brand-primary-dark);
+    box-shadow: 0 8px 18px -6px rgba(31, 63, 54, 0.5);
+    transform: scale(1.03);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan-card,
+  .plan-badge,
+  .plan-subscribe {
+    transition-property: border-color, background-color, box-shadow !important;
+  }
+  .plan-card:hover,
+  .plan-card:active,
+  .plan-subscribe:hover,
+  .plan-subscribe:active {
+    transform: none !important;
+  }
+  .plan-card:hover .plan-badge {
+    translate: -50% 0 !important;
+  }
 }
 
 /* Visible keyboard focus ring, app-wide, additive only (doesn't fire on mouse

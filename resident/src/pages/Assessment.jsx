@@ -125,6 +125,21 @@ function Assessment() {
             much it applied to you.
           </p>
 
+          <p className="text-xs text-brand-ink/40 mb-6">
+            The Mood, Anxiety, and Stress domains below are informed by well-established screening
+            concepts catalogued on{' '}
+            <a
+              href="https://psychology-tools.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-brand-ink/60"
+            >
+              psychology-tools.com
+            </a>
+            . This check-in is an original, OpenUp-authored reflection tool -- not a reproduction of
+            any single published instrument -- and is not a substitute for a formal clinical assessment.
+          </p>
+
           <button
             onClick={() => setStep('consent')}
             className="w-full bg-brand-primary text-white py-2.5 rounded-full font-medium hover:bg-brand-primary-dark transition-colors"

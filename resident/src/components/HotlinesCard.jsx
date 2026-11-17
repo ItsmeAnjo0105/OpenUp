@@ -11,6 +11,9 @@ import { IconPhoneCall } from '@tabler/icons-react';
 // numbers) -- so they're left out rather than guessed. A wrong number shown
 // to someone in crisis is dangerous.
 function HotlinesCard({ barangayName, emergencyContacts = [] }) {
+  const barangayContacts = emergencyContacts.filter((c) => c.barangay_id != null);
+  const platformContacts = emergencyContacts.filter((c) => c.barangay_id == null);
+
   return (
     <div className="bg-brand-surface rounded-2xl shadow-sm p-5 space-y-5 lg:sticky lg:top-6">
       <div className="flex items-center gap-2">
@@ -25,14 +28,34 @@ function HotlinesCard({ barangayName, emergencyContacts = [] }) {
         <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-ink/40 mb-2">
           Your Barangay{barangayName ? ` (${barangayName})` : ''}
         </p>
-        <div className="space-y-2">
-          {['Barangay Health Center', 'Local Emergency Team', 'Barangay Hall'].map((label) => (
-            <div key={label} className="bg-brand-bg rounded-xl p-3 flex items-center justify-between gap-2">
-              <p className="text-sm">{label}</p>
-              <p className="text-xs text-brand-ink/40 italic">Not yet added</p>
-            </div>
-          ))}
-        </div>
+        {barangayContacts.length === 0 ? (
+          <div className="space-y-2">
+            {['Barangay Health Center', 'Local Emergency Team', 'Barangay Hall'].map((label) => (
+              <div key={label} className="bg-brand-bg rounded-xl p-3 flex items-center justify-between gap-2">
+                <p className="text-sm">{label}</p>
+                <p className="text-xs text-brand-ink/40 italic">Not yet added</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {barangayContacts.map((c) => (
+              <div key={c.contact_id} className="bg-brand-bg rounded-xl p-3">
+                <p className="text-sm font-semibold">{c.name}</p>
+                {c.phone.split('/').map((num) => (
+                  <a
+                    key={num}
+                    href={`tel:${num.trim().replace(/[^\d+]/g, '')}`}
+                    className="text-sm font-medium text-brand-primary block"
+                  >
+                    {num.trim()}
+                  </a>
+                ))}
+                {c.description && <p className="text-xs text-brand-ink/50 mt-0.5">{c.description}</p>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div>
@@ -69,13 +92,13 @@ function HotlinesCard({ barangayName, emergencyContacts = [] }) {
         <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-ink/40 mb-2">
           Verified Contacts
         </p>
-        {emergencyContacts.length === 0 ? (
+        {platformContacts.length === 0 ? (
           <p className="text-xs text-brand-ink/50">
             No additional contacts verified yet. Your barangay can have one added through OpenUp's admin.
           </p>
         ) : (
           <div className="space-y-2">
-            {emergencyContacts.map((c) => (
+            {platformContacts.map((c) => (
               <div key={c.contact_id} className="bg-brand-bg rounded-xl p-3.5">
                 <p className="text-sm font-semibold">{c.name}</p>
                 <a href={`tel:${c.phone}`} className="text-sm font-medium text-brand-primary">{c.phone}</a>

@@ -2,21 +2,15 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   IconMicrophone, IconPlayerPlay, IconPlayerPause,
-  IconFlame, IconNotebook, IconHeart, IconSun,
-  IconWind, IconPencil, IconWalk, IconUsers, IconLeaf, IconChevronRight,
+  IconFlame, IconNotebook, IconHeart, IconSun, IconTags,
+  IconLeaf, IconChevronRight,
 } from '@tabler/icons-react';
 import Layout from '../components/Layout';
 import JournalHistory from '../components/JournalHistory';
-import { API_URL } from '../config';
+import { JournalReflection, JournalRecommendations } from '../components/JournalAnalysis';
+import { API_URL, authHeader } from '../config';
 import { LEVEL_FALLBACK_LABEL } from '../utils/emotions';
 import { emotionMeta } from '../utils/voiceEmotions';
-
-const RECOMMENDATIONS = [
-  { icon: IconWind, title: 'Take a 2-minute breathing break', desc: 'Slow down. Breathe. You got this.' },
-  { icon: IconPencil, title: 'Write down how you’re feeling', desc: 'It helps to get your thoughts out.', action: 'journal' },
-  { icon: IconWalk, title: 'Take a short walk or stretch', desc: 'Move a little. Feel a little better.' },
-  { icon: IconUsers, title: 'Reach out to someone you trust', desc: "You don’t have to go through this alone.", action: 'chat' },
-];
 
 function greetingForNow() {
   const h = new Date().getHours();
@@ -45,6 +39,19 @@ function computeAvgMoodLabel(entries) {
   const avg = entries.reduce((sum, e) => sum + emotionMeta(e.emotion_result).level, 0) / entries.length;
   const rounded = Math.min(5, Math.max(1, Math.round(avg)));
   return LEVEL_FALLBACK_LABEL[rounded];
+}
+
+// "Most Frequently Identified Emotion" -- a real tally over the resident's own
+// saved entries, not a guess.
+function computeTopEmotion(entries) {
+  if (!entries.length) return '—';
+  const counts = {};
+  entries.forEach((e) => {
+    if (!e.emotion_result) return;
+    counts[e.emotion_result] = (counts[e.emotion_result] || 0) + 1;
+  });
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return top ? top[0][0].toUpperCase() + top[0].slice(1) : '—';
 }
 
 function StatTile({ icon, label, value, tint }) {
@@ -90,6 +97,14 @@ function VoiceJournal() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
 
+  // Transcription happens entirely in the browser (Web Speech API) instead of
+  // a paid server-side model -- captured automatically while recording and
+  // saved as-is, no manual edit step. liveCaption is just the on-screen
+  // preview while listening.
+  const [liveCaption, setLiveCaption] = useState('');
+  const [transcriptMissing, setTranscriptMissing] = useState(false);
+  const speechSupported = typeof window !== 'undefined' && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const streamRef = useRef(null);
@@ -102,17 +117,23 @@ function VoiceJournal() {
   const reviewBlobRef = useRef(null);
   const reviewAudioRef = useRef(null);
   const micCardRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const recognitionActiveRef = useRef(false);
+  const finalTranscriptRef = useRef('');
+  const interimTranscriptRef = useRef('');
+  const capturedTranscriptRef = useRef('');
+  // MediaRecorder's onstop fires almost immediately, but SpeechRecognition.stop()
+  // is asynchronous and can take noticeably longer to actually finalize --
+  // finalizeRecording must wait for BOTH, or it reads the transcript before
+  // recognition has finished writing to it.
+  const pendingStopRef = useRef({ media: false, speech: false });
+  const finalizeTimeoutRef = useRef(null);
 
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
-  const handleRecommendation = (action) => {
-    if (action === 'journal') micCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    if (action === 'chat') navigate('/anonymous-chat');
-  };
-
   const loadHistory = () => {
-    fetch(`${API_URL}/voice-journal/user/${user.user_id}`)
+    fetch(`${API_URL}/voice-journal/user/${user.user_id}`, { headers: authHeader() })
       .then((res) => res.json())
       .then((data) => setHistory(Array.isArray(data) ? data : []))
       .catch(() => {});
@@ -128,6 +149,8 @@ function VoiceJournal() {
       cancelAnimationFrame(animationFrameRef.current);
       audioContextRef.current?.close();
       streamRef.current?.getTracks().forEach((t) => t.stop());
+      recognitionRef.current?.stop();
+      if (finalizeTimeoutRef.current) clearTimeout(finalizeTimeoutRef.current);
       if (reviewUrl) URL.revokeObjectURL(reviewUrl);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -167,6 +190,12 @@ function VoiceJournal() {
     setStatus('');
     setResult(null);
     setDismissed(false);
+    setLiveCaption('');
+    setTranscriptMissing(false);
+    finalTranscriptRef.current = '';
+    interimTranscriptRef.current = '';
+    pendingStopRef.current = { media: false, speech: false };
+    if (finalizeTimeoutRef.current) clearTimeout(finalizeTimeoutRef.current);
 
     let stream;
     try {
@@ -181,7 +210,10 @@ function VoiceJournal() {
     const recorder = new MediaRecorder(stream);
     chunksRef.current = [];
     recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
-    recorder.onstop = handleRecordingStopped;
+    recorder.onstop = () => {
+      pendingStopRef.current.media = true;
+      maybeFinalizeRecording();
+    };
     recorder.start();
     mediaRecorderRef.current = recorder;
     recordingStartRef.current = Date.now();
@@ -197,20 +229,92 @@ function VoiceJournal() {
 
     animateBars();
 
+    // Transcription runs client-side via the browser's own speech recognizer
+    // (free, no HuggingFace account involved) instead of uploading the audio
+    // for a server-side model to transcribe. Not every browser has one --
+    // speechSupported gates this.
+    if (speechSupported) {
+      const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const recognition = new SpeechRecognitionCtor();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event) => {
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const text = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscriptRef.current += `${text} `;
+          } else {
+            interim += text;
+          }
+        }
+        interimTranscriptRef.current = interim;
+        setLiveCaption(`${finalTranscriptRef.current}${interim}`.trim());
+      };
+      // Chrome's recognizer can stop itself after a few seconds of silence
+      // even with continuous=true -- restart it automatically as long as
+      // we're still actively recording, so a longer entry doesn't silently
+      // lose everything said after the first pause. Once we've actually
+      // asked it to stop (recognitionActiveRef false), this onend is the
+      // real, final one -- that's when it's safe to read the transcript.
+      recognition.onend = () => {
+        if (recognitionActiveRef.current) {
+          try { recognition.start(); } catch { /* already starting */ }
+        } else {
+          pendingStopRef.current.speech = true;
+          maybeFinalizeRecording();
+        }
+      };
+      // Recognition erroring (e.g. a momentary 'no-speech') never interrupts
+      // the actual recording -- MediaRecorder keeps running independently,
+      // and onend above restarts recognition if we're still listening.
+      recognition.onerror = () => {};
+
+      recognitionActiveRef.current = true;
+      recognition.start();
+      recognitionRef.current = recognition;
+    }
+
     setStep('listening');
   };
 
   const stopRecording = () => {
-    mediaRecorderRef.current?.stop(); // triggers handleRecordingStopped once flushed
+    mediaRecorderRef.current?.stop(); // flags pendingStopRef.media once flushed
     cancelAnimationFrame(animationFrameRef.current);
     audioContextRef.current?.close();
     streamRef.current?.getTracks().forEach((t) => t.stop());
+    recognitionActiveRef.current = false;
+    if (recognitionRef.current) {
+      recognitionRef.current.stop(); // flags pendingStopRef.speech once it actually finishes
+    } else {
+      pendingStopRef.current.speech = true; // nothing to wait for (unsupported browser)
+    }
     speakingRef.current = false;
     setSpeaking(false);
+
+    // Safety net: if recognition never fires its final onend (seen on some
+    // browsers/network conditions), don't leave the resident stuck staring
+    // at a spinner forever -- finalize with whatever was captured so far.
+    finalizeTimeoutRef.current = setTimeout(() => {
+      pendingStopRef.current.speech = true;
+      maybeFinalizeRecording();
+    }, 3000);
   };
 
-  // Recording has stopped — move to the review step. Nothing is uploaded yet.
-  const handleRecordingStopped = () => {
+  const maybeFinalizeRecording = () => {
+    if (!pendingStopRef.current.media || !pendingStopRef.current.speech) return;
+    if (finalizeTimeoutRef.current) {
+      clearTimeout(finalizeTimeoutRef.current);
+      finalizeTimeoutRef.current = null;
+    }
+    finalizeRecording();
+  };
+
+  // Both the recording and (if supported) speech recognition have genuinely
+  // finished — safe to read the transcript now and move to the review step.
+  const finalizeRecording = () => {
     const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
     reviewBlobRef.current = blob;
 
@@ -225,6 +329,13 @@ function VoiceJournal() {
     setReviewBars(bars);
     setCurrentTime(0);
     setIsPlaying(false);
+
+    // Folds in any trailing interim text that never got a chance to finalize
+    // before recognition stopped -- without this a short recording can lose
+    // everything said, since only finalized results were being kept.
+    const captured = `${finalTranscriptRef.current} ${interimTranscriptRef.current}`.trim();
+    capturedTranscriptRef.current = captured;
+    setTranscriptMissing(!captured);
     setStep('reviewing');
   };
 
@@ -264,19 +375,20 @@ function VoiceJournal() {
 
   const handleSaveReflection = async () => {
     const blob = reviewBlobRef.current;
-    if (!blob) return;
+    if (!blob || !capturedTranscriptRef.current) return;
 
     setSaving(true);
     setStatus('Saving and reflecting...');
 
     const formData = new FormData();
     formData.append('audio', blob, 'journal.webm');
-    formData.append('user_id', user.user_id);
     formData.append('duration_seconds', String(reviewDuration));
+    formData.append('transcript', capturedTranscriptRef.current);
 
     try {
       const res = await fetch(`${API_URL}/voice-journal`, {
         method: 'POST',
+        headers: authHeader(),
         body: formData,
       });
       const data = await res.json();
@@ -323,9 +435,38 @@ function VoiceJournal() {
 
   const journalStreak = useMemo(() => computeJournalStreak(history), [history]);
   const avgMoodLabel = useMemo(() => computeAvgMoodLabel(history), [history]);
+  const topEmotion = useMemo(() => computeTopEmotion(history), [history]);
   const lastEntryLabel = history[0]
     ? new Date(history[0].created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
     : '—';
+
+  // The freshly-analyzed `result` (right after recording) takes priority over
+  // `history[0]` (same most-recent row, but from a past visit) -- same shape,
+  // just whichever is more current.
+  const latestEntry = result || history[0] || null;
+
+  const toggleRecommendation = async (index, completed) => {
+    if (!latestEntry) return;
+    try {
+      const res = await fetch(`${API_URL}/voice-journal/${latestEntry.journal_id}/recommendations/${index}`, {
+        method: 'PATCH',
+        headers: { ...authHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed }),
+      });
+      if (res.ok) {
+        if (result && result.journal_id === latestEntry.journal_id) {
+          setResult((prev) => {
+            const next = [...prev.recommendations];
+            next[index] = { ...next[index], completed };
+            return { ...prev, recommendations: next };
+          });
+        }
+        loadHistory();
+      }
+    } catch {
+      // leave it as-is, the resident can try again
+    }
+  };
 
   if (!user) return null;
 
@@ -387,6 +528,15 @@ function VoiceJournal() {
                   settings to use Voice Journal.
                 </p>
               )}
+              {step === 'listening' && speechSupported && liveCaption && (
+                <p className="mt-4 text-sm text-brand-ink/70 italic">"{liveCaption}"</p>
+              )}
+              {step === 'listening' && !speechSupported && (
+                <p className="mt-4 text-xs text-brand-ink/50">
+                  Live transcription isn't supported in this browser. Try Chrome or Edge for
+                  automatic transcription.
+                </p>
+              )}
               {status && <p className="mt-4 text-brand-ink/60 text-sm">{status}</p>}
             </div>
           </div>
@@ -438,6 +588,14 @@ function VoiceJournal() {
               </p>
             </div>
 
+            {transcriptMissing && (
+              <p className="text-sm text-brand-accent bg-brand-accent/10 rounded-lg px-4 py-3 mb-6">
+                {speechSupported
+                  ? "We couldn't catch what you said. Tap Retry and try speaking a little louder or closer to the mic."
+                  : "This browser can't transcribe automatically. Try Chrome or Edge, or tap Retry."}
+              </p>
+            )}
+
             <div className="flex items-center gap-3">
               <button
                 onClick={handleRetry}
@@ -448,7 +606,7 @@ function VoiceJournal() {
               </button>
               <button
                 onClick={handleSaveReflection}
-                disabled={saving}
+                disabled={saving || transcriptMissing}
                 className="flex-1 text-white py-2.5 rounded-full font-medium transition-colors disabled:opacity-60"
                 style={{ backgroundColor: '#2b4d3f' }}
               >
@@ -527,24 +685,11 @@ function VoiceJournal() {
               <p className="text-sm text-brand-ink/80">"{result.transcript}"</p>
             </div>
 
-            <div className="bg-brand-surface rounded-2xl shadow-sm p-5">
-              <p className="font-medium text-brand-primary text-sm mb-1">AI Reflection</p>
-              <p className="text-xs font-medium text-brand-ink/50 mt-3 mb-1">Emotional Summary</p>
-              <p className="text-sm text-brand-ink/80 mb-4">{result.emotional_summary}</p>
-              <p className="text-sm text-brand-ink/80 mb-4">{result.wellness_suggestion}</p>
-              <p className="text-xs font-medium text-brand-ink/50 mb-2">From what you said</p>
-              <div className="flex gap-2 flex-wrap">
-                {result.content_indicators?.map((label) => (
-                  <span key={label} className="text-xs font-medium bg-brand-primary/10 text-brand-primary px-3 py-1 rounded-full capitalize">
-                    {label}
-                  </span>
-                ))}
-              </div>
-            </div>
+            <JournalReflection entry={result} />
           </div>
         )}
 
-        <JournalHistory entries={history} />
+        <JournalHistory entries={history} onRefresh={loadHistory} />
         </div>
 
         <div className="space-y-6">
@@ -571,48 +716,33 @@ function VoiceJournal() {
               />
               <StatTile
                 icon={<IconSun size={17} />}
-                label="Avg Mood"
+                label="Mood Trend"
                 value={avgMoodLabel}
                 tint="bg-amber-100 text-amber-700"
+              />
+              <StatTile
+                icon={<IconTags size={17} />}
+                label="Top Emotion"
+                value={topEmotion}
+                tint="bg-rose-100 text-rose-700"
               />
             </div>
           </div>
 
           <div className="bg-brand-surface rounded-2xl shadow-sm p-5" style={{ border: '0.5px solid rgba(28,36,32,0.1)' }}>
             <p className="font-display text-base font-semibold flex items-center gap-1.5">
-              <IconLeaf size={16} className="text-brand-primary" /> Recommendations to Do
+              <IconLeaf size={16} className="text-brand-primary" /> Personalized Recommendations to Do
             </p>
-            <p className="text-xs text-brand-ink/50 mb-3">Small steps can make a big difference.</p>
-            <div>
-              {RECOMMENDATIONS.map((r) => {
-                const Icon = r.icon;
-                const content = (
-                  <>
-                    <span className="w-10 h-10 rounded-xl bg-brand-primary/10 text-brand-primary flex items-center justify-center shrink-0">
-                      <Icon size={18} />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium leading-tight">{r.title}</p>
-                      <p className="text-xs text-brand-ink/50 mt-0.5">{r.desc}</p>
-                    </div>
-                  </>
-                );
-                return r.action ? (
-                  <button
-                    key={r.title}
-                    onClick={() => handleRecommendation(r.action)}
-                    className="w-full flex items-center gap-3 py-2.5 text-left hover:bg-brand-ink/5 rounded-xl px-1.5 -mx-1.5"
-                  >
-                    {content}
-                    <IconChevronRight size={15} className="text-brand-ink/30 shrink-0" />
-                  </button>
-                ) : (
-                  <div key={r.title} className="w-full flex items-center gap-3 py-2.5">
-                    {content}
-                  </div>
-                );
-              })}
-            </div>
+            <p className="text-xs text-brand-ink/50 mb-3">
+              {latestEntry
+                ? `Based on your last entry -- possibly feeling ${(latestEntry.emotion_result || 'okay').toLowerCase()}.`
+                : 'Record an entry to get recommendations tailored to it.'}
+            </p>
+            <JournalRecommendations
+              entry={latestEntry}
+              onToggleRecommendation={latestEntry?.journal_id ? toggleRecommendation : undefined}
+              emptyHint="Small steps can make a big difference -- your first entry will get its own recommendations here."
+            />
           </div>
         </div>
       </div>

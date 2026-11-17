@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import MaintenanceBanner from './components/MaintenanceBanner';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
@@ -14,7 +14,7 @@ import GroupSession from './pages/GroupSession';
 import Assessment from './pages/Assessment';
 import PsychologistDashboard from './pages/PsychologistDashboard';
 import PsychologistRequests from './pages/PsychologistRequests';
-import PsychologistChats from './pages/PsychologistChats';
+import ResidentInquiries from './pages/ResidentInquiries';
 import PsychologistClients from './pages/PsychologistClients';
 import PsychologistClientDetail from './pages/PsychologistClientDetail';
 import PsychologistGroupSessions from './pages/PsychologistGroupSessions';
@@ -43,13 +43,14 @@ import LguRiskAlerts from './pages/LguRiskAlerts';
 import LguReport from './pages/LguReport';
 import LguCareCredits from './pages/LguCareCredits';
 import LguFunding from './pages/LguFunding';
+import LguSubscription from './pages/LguSubscription';
 import LguAiEffectiveness from './pages/LguAiEffectiveness';
 import LguResourceAllocation from './pages/LguResourceAllocation';
 import LguWellnessIndex from './pages/LguWellnessIndex';
 import LguDataGovernance from './pages/LguDataGovernance';
 import LguPsychologistDirectory from './pages/LguPsychologistDirectory';
 import LguProfile from './pages/LguProfile';
-import AnonymousChat from './pages/AnonymousChat';
+import Messages from './pages/Messages';
 import PaymentResult from './pages/PaymentResult';
 import Profile from './pages/Profile';
 import Resources from './pages/Resources';
@@ -75,7 +76,9 @@ function App() {
       <Route path="/assessment" element={<Assessment />} />
       <Route path="/psychologist/dashboard" element={<PsychologistDashboard />} />
       <Route path="/psychologist/requests" element={<PsychologistRequests />} />
-      <Route path="/psychologist/chats" element={<PsychologistChats />} />
+      <Route path="/psychologist/inquiries" element={<ResidentInquiries />} />
+      {/* Old Anonymous Chats URL (still in older notifications) */}
+      <Route path="/psychologist/chats" element={<Navigate to="/psychologist/inquiries" replace />} />
       <Route path="/psychologist/clients" element={<PsychologistClients />} />
       <Route path="/psychologist/clients/:residentId" element={<PsychologistClientDetail />} />
       <Route path="/psychologist/group-sessions" element={<PsychologistGroupSessions />} />
@@ -103,6 +106,7 @@ function App() {
       <Route path="/lgu/residents" element={<LguResidents />} />
       <Route path="/lgu/report" element={<LguReport />} />
       <Route path="/lgu/care-credits" element={<LguCareCredits />} />
+      <Route path="/lgu/subscription" element={<LguSubscription />} />
       <Route path="/lgu/funding" element={<LguFunding />} />
       <Route path="/lgu/ai-effectiveness" element={<LguAiEffectiveness />} />
       <Route path="/lgu/resource-allocation" element={<LguResourceAllocation />} />
@@ -110,7 +114,8 @@ function App() {
       <Route path="/lgu/data-governance" element={<LguDataGovernance />} />
       <Route path="/lgu/psychologists" element={<LguPsychologistDirectory />} />
       <Route path="/lgu/profile" element={<LguProfile />} />
-      <Route path="/anonymous-chat" element={<AnonymousChat />} />
+      <Route path="/messages" element={<Messages />} />
+      <Route path="/anonymous-chat" element={<Navigate to="/messages" replace />} />
       <Route path="/payment/result" element={<PaymentResult />} />
       <Route path="/profile" element={<Profile />} />
       <Route path="/resources" element={<Resources />} />

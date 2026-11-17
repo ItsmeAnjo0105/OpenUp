@@ -6,7 +6,7 @@ import { playHover, playClick } from '../utils/sound';
 const modules = [
   { label: 'Dashboard', path: '/dashboard', icon: '🏠', color: 'bg-emerald-400/20', enabled: true },
   { label: 'AI Crisis Companion', path: '/crisis-companion', icon: '❤️', color: 'bg-rose-400/20', enabled: true, badge: 'New' },
-  { label: 'Anonymous Chat', path: '/anonymous-chat', icon: '💬', color: 'bg-violet-400/20', enabled: true },
+  { label: 'Messages', path: '/messages', icon: '💬', color: 'bg-violet-400/20', enabled: true },
   { label: 'Book Counseling', path: '/booking', icon: '📅', color: 'bg-sky-400/20', enabled: true },
   { label: 'Group Sessions', path: '/group-counseling', icon: '👥', color: 'bg-indigo-400/20', enabled: true },
   { label: 'Mood Tracker', path: '/mood-tracker', icon: '📈', color: 'bg-teal-400/20', enabled: true },

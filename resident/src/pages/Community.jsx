@@ -245,6 +245,10 @@ function Community() {
           </button>
         </form>
 
+        {testimonials.length === 0 && !error && (
+          <p className="text-sm text-brand-ink/50">No posts yet — be the first to share something with the community.</p>
+        )}
+
         <div className="space-y-4">
           {testimonials.map((t) => (
             <div key={t.testimonial_id} className="bg-brand-surface rounded-2xl shadow-sm p-5">

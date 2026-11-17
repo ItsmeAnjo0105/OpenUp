@@ -6,7 +6,7 @@ function Signup() {
   const [barangays, setBarangays] = useState([]);
   const [form, setForm] = useState({
     name: '', email: '', password: '', role: 'resident', barangay_id: '',
-    license_no: '', credentials: '', session_price: '',
+    license_no: '', credentials: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -104,15 +104,10 @@ function Signup() {
                   className="w-full border border-brand-ink/15 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-primary"
                 />
               </div>
-              <div>
-                <label className="text-sm font-medium block mb-1">Session price (₱)</label>
-                <input
-                  type="number" min="1" name="session_price" value={form.session_price} onChange={handleChange} required
-                  className="w-full border border-brand-ink/15 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-primary"
-                />
-              </div>
               <p className="text-xs text-brand-ink/50 -mt-2">
-                An admin will need to verify your license before you appear to residents.
+                An admin will need to verify your license, and you'll set your session price from
+                your profile, before you appear to residents. After signing in, upload a photo of your
+                PRC license from Profile so the admin can review it.
               </p>
             </>
           )}

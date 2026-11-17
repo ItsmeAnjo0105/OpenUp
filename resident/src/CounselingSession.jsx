@@ -31,9 +31,10 @@ function CounselingSession({ bookingId, name, role }) {
       .catch(() => {});
   };
 
+  // Notes are visible to both participants now (see server's GET /bookings/:id/notes) --
+  // the resident side renders them read-only further down, the psychologist side edits them.
   useEffect(() => {
-    if (!isPsychologist) return;
-    loadBooking();
+    if (isPsychologist) loadBooking();
     fetch(`${API_URL}/bookings/${bookingId}/notes`, { headers: authHeader() })
       .then((res) => res.json())
       .then((data) => setNotes(data?.body || ''))
@@ -172,6 +173,13 @@ function CounselingSession({ bookingId, name, role }) {
       <h2>Counseling Session — Booking #{bookingId}</h2>
       <div ref={jitsiContainerRef} />
 
+      {!isPsychologist && notes && (
+        <div className="max-w-xl mt-6 bg-brand-surface rounded-2xl shadow-sm p-5">
+          <p className="font-medium mb-1">Session notes from your psychologist</p>
+          <p className="text-sm text-brand-ink/80 whitespace-pre-wrap mt-3">{notes}</p>
+        </div>
+      )}
+
       {isPsychologist && (
         <div className="max-w-xl mt-6 space-y-6">
           {actionError && <p className="text-sm text-red-600">{actionError}</p>}
@@ -228,7 +236,7 @@ function CounselingSession({ bookingId, name, role }) {
 
           <div className="bg-brand-surface rounded-2xl shadow-sm p-5">
             <p className="font-medium mb-3">Session notes</p>
-            <p className="text-xs text-brand-ink/50 mb-3">Private to you -- your client can never see this.</p>
+            <p className="text-xs text-brand-ink/50 mb-3">Visible to your client once saved.</p>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}

@@ -3,11 +3,13 @@ import Layout from '../components/Layout';
 import DailyInsights from '../components/DailyInsights';
 import MoodCalendar from '../components/MoodCalendar';
 import EmotionPicker from '../components/EmotionPicker';
+import MoodResponse from '../components/MoodResponse';
 import { API_URL } from '../config';
 
 function MoodTracker() {
   const [entries, setEntries] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [insightsKey, setInsightsKey] = useState(0);
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
 
   const loadEntries = () => {
@@ -57,7 +59,16 @@ function MoodTracker() {
           />
         </div>
 
-        <DailyInsights userId={user.user_id} />
+        {todayEntry && (
+          <MoodResponse
+            key={`${todayEntry.mood_id}-${todayEntry.mood_label}`}
+            entry={todayEntry}
+            userId={user.user_id}
+            onTagsSaved={() => setInsightsKey((k) => k + 1)}
+          />
+        )}
+
+        <DailyInsights key={insightsKey} userId={user.user_id} />
 
         <MoodCalendar userId={user.user_id} />
       </div>

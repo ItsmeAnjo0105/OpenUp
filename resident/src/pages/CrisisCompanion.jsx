@@ -1,12 +1,46 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { IconHistory, IconPlus, IconTrash, IconX } from '@tabler/icons-react';
 import Layout from '../components/Layout';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { API_URL, authHeader } from '../config';
+import { playHover, playClick } from '../utils/sound';
+
+const GREETING = { role: 'assistant', content: "Hi, I'm here with you. What's on your mind today?" };
+const fmtDate = (d) => new Date(d).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
+
+const PREFERENCES = [
+  { value: 'listen', label: 'Just listen' },
+  { value: 'advice', label: 'I need advice' },
+  { value: 'understand', label: 'Help me understand my feelings' },
+  { value: 'calm', label: 'Help me calm down' },
+];
+
+// The companion is told not to use markdown (see COMPANION_SYSTEM_PROMPT), but
+// this is a safety net for whatever slips through anyway: splits into
+// paragraph/list-item lines and turns any stray **bold** into real emphasis,
+// instead of showing literal asterisks and a wall of run-together text.
+function formatCompanionMessage(content) {
+  const lines = content.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  return lines.map((line, i) => {
+    const isListItem = /^(\d+[.)]|[-•])\s+/.test(line);
+    const parts = line.split(/(\*\*[^*]+\*\*)/g).filter(Boolean).map((part, j) => (
+      part.startsWith('**') && part.endsWith('**')
+        ? <strong key={j} className="font-semibold">{part.slice(2, -2)}</strong>
+        : <span key={j}>{part}</span>
+    ));
+    return (
+      <p key={i} className={isListItem ? 'pl-3 -indent-3' : ''}>
+        {parts}
+      </p>
+    );
+  });
+}
 
 function CrisisCompanion() {
-  const [messages, setMessages] = useState([
-    { role: 'assistant', content: "Hi, I'm here with you. What's on your mind today?" },
-  ]);
+  const [messages, setMessages] = useState([GREETING]);
+  const [conversationId, setConversationId] = useState(null);
+  const [preference, setPreference] = useState(null);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [crisisDetected, setCrisisDetected] = useState(false);
@@ -18,6 +52,11 @@ function CrisisCompanion() {
   const [alertError, setAlertError] = useState('');
   const [rating, setRating] = useState(null);
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [conversations, setConversations] = useState([]);
+  const [historyError, setHistoryError] = useState('');
+  const [loadingConversation, setLoadingConversation] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const bottomRef = useRef(null);
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('openup_user') || 'null');
@@ -68,18 +107,90 @@ function CrisisCompanion() {
     try {
       const res = await fetch(`${API_URL}/crisis-companion/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input, history: newMessages, user_id: user.user_id }),
+        headers: { ...authHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: input, history: newMessages, conversation_id: conversationId, preference }),
       });
       const data = await res.json();
 
       setMessages([...newMessages, { role: 'assistant', content: data.reply }]);
       if (data.crisis_detected) setCrisisDetected(true);
+      if (data.conversation_id) setConversationId(data.conversation_id);
     } catch {
       setMessages([...newMessages, { role: 'assistant', content: "I'm having trouble connecting right now. Please try again." }]);
     } finally {
       setSending(false);
     }
+  };
+
+  const startNewConversation = () => {
+    playClick();
+    setMessages([GREETING]);
+    setConversationId(null);
+    setPreference(null);
+    setCrisisDetected(false);
+    setCrisisStatus(null);
+    setRating(null);
+    setRatingSubmitted(false);
+    setHistoryOpen(false);
+  };
+
+  const loadConversations = () => {
+    setHistoryError('');
+    fetch(`${API_URL}/crisis-companion/conversations`, { headers: authHeader() })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (ok && Array.isArray(data)) setConversations(data);
+        else setHistoryError(data?.error || 'Could not load your conversation history.');
+      })
+      .catch(() => setHistoryError('Could not reach the server.'));
+  };
+
+  const openHistory = () => {
+    playClick();
+    loadConversations();
+    setHistoryOpen(true);
+  };
+
+  const openConversation = async (id) => {
+    playClick();
+    setLoadingConversation(true);
+    setHistoryError('');
+    try {
+      const res = await fetch(`${API_URL}/crisis-companion/conversations/${id}/messages`, { headers: authHeader() });
+      const data = await res.json();
+      if (!res.ok || !Array.isArray(data)) { setHistoryError(data?.error || 'Could not load this conversation.'); return; }
+      setMessages([GREETING, ...data.map((m) => ({ role: m.role, content: m.content }))]);
+      setConversationId(id);
+      setPreference(null);
+      setCrisisDetected(data.some((m) => m.crisis_detected));
+      setCrisisStatus(null);
+      setRating(null);
+      setRatingSubmitted(false);
+      setHistoryOpen(false);
+    } catch {
+      setHistoryError('Could not reach the server.');
+    } finally {
+      setLoadingConversation(false);
+    }
+  };
+
+  const deleteConversation = (conversation) => {
+    setConfirmDialog({
+      title: 'Delete this conversation?',
+      message: `"${conversation.title}" will be permanently deleted. This can't be undone.`,
+      confirmLabel: 'Delete',
+      destructive: true,
+      onConfirm: async () => {
+        const res = await fetch(`${API_URL}/crisis-companion/conversations/${conversation.conversation_id}`, {
+          method: 'DELETE',
+          headers: authHeader(),
+        });
+        if (res.ok) {
+          if (conversation.conversation_id === conversationId) startNewConversation();
+          loadConversations();
+        }
+      },
+    });
   };
 
   const submitRating = async (value) => {
@@ -123,9 +234,28 @@ function CrisisCompanion() {
   return (
     <Layout>
       <div className="max-w-xl mx-auto flex flex-col h-[80vh]">
-        <h1 className="font-display text-2xl font-semibold mb-1">AI Crisis Companion</h1>
+        <div className="flex items-start justify-between gap-3 mb-1">
+          <h1 className="font-display text-2xl font-semibold">AI Crisis Companion</h1>
+          <div className="flex gap-2 shrink-0 mt-0.5">
+            <button
+              onClick={startNewConversation}
+              onMouseEnter={playHover}
+              className="interactive text-xs font-medium px-3 py-1.5 rounded-full border border-brand-ink/20 flex items-center gap-1"
+            >
+              <IconPlus size={14} /> New chat
+            </button>
+            <button
+              onClick={openHistory}
+              onMouseEnter={playHover}
+              className="interactive text-xs font-medium px-3 py-1.5 rounded-full border border-brand-ink/20 flex items-center gap-1"
+            >
+              <IconHistory size={14} /> History
+            </button>
+          </div>
+        </div>
         <p className="text-brand-ink/60 text-sm mb-4">
           A private, judgment-free space to talk. Not a replacement for professional care.
+          {loadingConversation && <span className="text-brand-ink/40"> Loading conversation...</span>}
         </p>
 
         {crisisDetected && (
@@ -197,15 +327,20 @@ function CrisisCompanion() {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto space-y-3 mb-4 pr-1">
+        <div className="flex-1 overflow-y-auto chat-scroll space-y-3.5 mb-4 pr-2">
           {messages.map((m, i) => (
-            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-sm ${
+            <div key={i} className={`flex items-end gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              {m.role === 'assistant' && (
+                <span className="w-7 h-7 rounded-full bg-brand-primary/10 text-brand-primary flex items-center justify-center text-sm shrink-0">
+                  💚
+                </span>
+              )}
+              <div className={`max-w-[75%] px-4 py-3 rounded-2xl text-sm leading-relaxed break-words space-y-1.5 ${
                 m.role === 'user'
-                  ? 'bg-brand-primary text-white'
-                  : 'bg-brand-surface shadow-sm text-brand-ink/80'
+                  ? 'bg-brand-primary text-white rounded-br-md'
+                  : 'bg-brand-surface shadow-sm text-brand-ink/80 rounded-bl-md'
               }`}>
-                {m.content}
+                {m.role === 'assistant' ? formatCompanionMessage(m.content) : m.content}
               </div>
             </div>
           ))}
@@ -234,6 +369,24 @@ function CrisisCompanion() {
           </div>
         )}
 
+        <div className="flex flex-wrap gap-1.5 mb-2.5">
+          {PREFERENCES.map((p) => (
+            <button
+              key={p.value}
+              type="button"
+              onClick={() => { playClick(); setPreference((prev) => (prev === p.value ? null : p.value)); }}
+              onMouseEnter={playHover}
+              className={`interactive text-[11px] font-medium px-3 py-1.5 rounded-full border ${
+                preference === p.value
+                  ? 'bg-brand-primary text-white border-brand-primary'
+                  : 'border-brand-ink/15 text-brand-ink/60'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
         <form onSubmit={handleSend} className="flex gap-2">
           <input
             value={input}
@@ -250,6 +403,60 @@ function CrisisCompanion() {
           </button>
         </form>
       </div>
+
+      {historyOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4 py-8" onClick={() => setHistoryOpen(false)}>
+          <div
+            className="bg-brand-surface rounded-2xl shadow-sm p-6 max-w-md w-full max-h-[80vh] overflow-y-auto chat-scroll"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <p className="font-display text-lg font-semibold">Conversation history</p>
+              <button onClick={() => setHistoryOpen(false)} className="text-brand-ink/40 hover:text-brand-ink/70"><IconX size={18} /></button>
+            </div>
+            <p className="text-xs text-brand-ink/50 mb-4">Only you can see your own conversations.</p>
+
+            {historyError && <p className="text-sm text-red-600 mb-3">{historyError}</p>}
+
+            {conversations.length === 0 ? (
+              <p className="text-sm text-brand-ink/50">No past conversations yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {conversations.map((c) => (
+                  <div
+                    key={c.conversation_id}
+                    className={`flex items-center gap-2 border rounded-xl p-3 ${
+                      c.conversation_id === conversationId ? 'border-brand-primary' : 'border-brand-ink/10'
+                    }`}
+                  >
+                    <button
+                      onClick={() => openConversation(c.conversation_id)}
+                      onMouseEnter={playHover}
+                      className="interactive flex-1 text-left min-w-0"
+                    >
+                      <p className="text-sm font-medium truncate flex items-center gap-1.5">
+                        {c.crisis_detected && <span title="Flagged for crisis language">⚠️</span>}
+                        {c.title}
+                      </p>
+                      <p className="text-xs text-brand-ink/50 mt-0.5">{fmtDate(c.last_message_at)}</p>
+                    </button>
+                    <button
+                      onClick={() => deleteConversation(c)}
+                      onMouseEnter={playHover}
+                      className="interactive text-brand-ink/40 hover:text-red-600 p-1.5 shrink-0"
+                      aria-label="Delete conversation"
+                    >
+                      <IconTrash size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
     </Layout>
   );
 }

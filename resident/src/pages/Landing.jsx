@@ -222,7 +222,7 @@ function InlineAuthCard({ mode, onModeChange, onClose }) {
   const [barangays, setBarangays] = useState([]);
   const [signupForm, setSignupForm] = useState({
     name: '', email: '', password: '', role: 'resident', barangay_id: '',
-    license_no: '', credentials: '', session_price: '',
+    license_no: '', credentials: '',
   });
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
@@ -330,11 +330,10 @@ function InlineAuthCard({ mode, onModeChange, onClose }) {
                   <label className="text-xs font-semibold text-slate-600 block mb-1">Credentials</label>
                   <input name="credentials" value={signupForm.credentials} onChange={handleSignupChange} required placeholder="e.g. PRC Lic. Psychologist" className={inputClass} />
                 </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-600 block mb-1">Session price (₱)</label>
-                  <input type="number" min="1" name="session_price" value={signupForm.session_price} onChange={handleSignupChange} required className={inputClass} />
-                </div>
-                <p className="text-xs text-slate-400 -mt-2">An admin will need to verify your license before you appear to residents.</p>
+                <p className="text-xs text-slate-400 -mt-2">
+                  An admin will need to verify your license, and you'll set your session price from
+                  your profile, before you appear to residents.
+                </p>
               </>
             )}
 

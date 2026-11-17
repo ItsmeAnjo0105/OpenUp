@@ -30,8 +30,8 @@ function InquiryWidget({ psychologist, residentId, onClose }) {
     socket.emit('join-inquiry-chat', { residentId, psychologistId, token: localStorage.getItem('openup_token') });
     socket.on('chat-error', ({ error: err }) => setError(err));
     socket.on('new-inquiry-message', (message) => {
-      if (message.psychologist_id === psychologistId && message.resident_id === residentId) {
-        setMessages((prev) => [...prev, message]);
+      if (Number(message.psychologist_id) === Number(psychologistId) && Number(message.resident_id) === Number(residentId)) {
+        setMessages((prev) => (prev.some((m) => m.message_id === message.message_id) ? prev : [...prev, message]));
       }
     });
 

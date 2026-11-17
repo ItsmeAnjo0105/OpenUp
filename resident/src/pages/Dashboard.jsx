@@ -39,7 +39,10 @@ function Dashboard() {
   };
 
   const loadEmergencyContacts = () => {
-    fetch(`${API_URL}/emergency-contacts`)
+    const url = user?.barangay_id
+      ? `${API_URL}/emergency-contacts?barangay_id=${user.barangay_id}`
+      : `${API_URL}/emergency-contacts`;
+    fetch(url)
       .then((res) => res.json())
       .then((data) => setEmergencyContacts(Array.isArray(data) ? data : []))
       .catch(() => {});

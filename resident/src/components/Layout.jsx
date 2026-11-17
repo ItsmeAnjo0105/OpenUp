@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import ReminderBanner from './ReminderBanner';
+import CallNotificationBanner from './CallNotificationBanner';
 import { API_URL, authHeader, dashboardPathForRole, getStoredUser } from '../config';
 
 // Mirrors PsychologistLayout/LguLayout/AdminLayout: owns the auth/role guard
@@ -41,6 +42,7 @@ function Layout({ children }) {
   return (
     <div className="flex h-screen overflow-hidden bg-brand-bg">
       <ReminderBanner />
+      <CallNotificationBanner />
       <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 
       {sidebarOpen && (

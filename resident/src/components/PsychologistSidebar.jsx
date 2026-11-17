@@ -5,9 +5,8 @@ import { playHover, playClick } from '../utils/sound';
 
 const items = [
   { label: 'Dashboard', path: '/psychologist/dashboard', icon: '🏠', color: 'bg-emerald-400/20' },
-  { label: 'Appointment Requests', path: '/psychologist/requests', icon: '📥', color: 'bg-sky-400/20' },
   { label: 'My Clients', path: '/psychologist/clients', icon: '👥', color: 'bg-indigo-400/20' },
-  { label: 'Anonymous Chats', path: '/psychologist/chats', icon: '💬', color: 'bg-violet-400/20' },
+  { label: 'Resident Inquiries', path: '/psychologist/inquiries', icon: '📨', color: 'bg-violet-400/20' },
   { label: 'Group Sessions', path: '/psychologist/group-sessions', icon: '🧑‍🤝‍🧑', color: 'bg-teal-400/20' },
   { label: 'Notes', path: '/psychologist/notes', icon: '📝', color: 'bg-amber-400/20' },
   { label: 'Schedule', path: '/psychologist/schedule', icon: '📅', color: 'bg-cyan-400/20' },
@@ -21,6 +20,7 @@ function PsychologistSidebar({ user, sidebarOpen, setSidebarOpen }) {
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('openup_sidebar_collapsed') === 'true');
   const [unreadCount, setUnreadCount] = useState(0);
+  const [inquiryUnread, setInquiryUnread] = useState(0);
 
   useEffect(() => {
     fetch(`${API_URL}/notifications`, { headers: authHeader() })
@@ -29,7 +29,16 @@ function PsychologistSidebar({ user, sidebarOpen, setSidebarOpen }) {
         if (Array.isArray(data)) setUnreadCount(data.filter((n) => !n.read).length);
       })
       .catch(() => {});
-  }, []);
+
+    // Unread resident messages across all Resident Inquiries conversations.
+    const loadInquiryUnread = () => fetch(`${API_URL}/psychologists/me/inquiries/unread-count`, { headers: authHeader() })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (data) setInquiryUnread(data.unread_messages || 0); })
+      .catch(() => {});
+    loadInquiryUnread();
+    const poll = setInterval(loadInquiryUnread, 30000);
+    return () => clearInterval(poll);
+  }, [location.pathname]);
 
   const toggleCollapsed = () => {
     setCollapsed((prev) => {
@@ -117,15 +126,18 @@ function PsychologistSidebar({ user, sidebarOpen, setSidebarOpen }) {
                 {item.icon}
               </span>
               {!collapsed && <span className="flex-1 leading-tight truncate">{item.label}</span>}
-              {item.path === '/notifications' && unreadCount > 0 && (
-                collapsed ? (
+              {(() => {
+                const badge = item.path === '/notifications' ? unreadCount
+                  : item.path === '/psychologist/inquiries' ? inquiryUnread : 0;
+                if (badge <= 0) return null;
+                return collapsed ? (
                   <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-400" />
                 ) : (
                   <span className="text-[11px] font-semibold min-w-4.5 h-4.5 px-1 rounded-full flex items-center justify-center bg-red-500 text-white">
-                    {unreadCount > 9 ? '9+' : unreadCount}
+                    {badge > 9 ? '9+' : badge}
                   </span>
-                )
-              )}
+                );
+              })()}
             </Link>
           );
         })}
